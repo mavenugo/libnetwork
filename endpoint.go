@@ -561,7 +561,7 @@ func (ep *endpoint) assignAddress() error {
 		err  error
 	)
 	n := ep.getNetwork()
-	if n.Type() == "host" || n.Type() == "null" || n.Type() == "bridge" {
+	if n.Type() == "host" || n.Type() == "null" {
 		return nil
 	}
 	ipam, err = n.getController().getIpamDriver(n.ipamType)
@@ -587,7 +587,7 @@ func (ep *endpoint) assignAddress() error {
 
 func (ep *endpoint) releaseAddress() {
 	n := ep.getNetwork()
-	if n.Type() == "host" || n.Type() == "null" || n.Type() == "bridge" {
+	if n.Type() == "host" || n.Type() == "null" {
 		return
 	}
 	ipam, err := n.getController().getIpamDriver(n.ipamType)
