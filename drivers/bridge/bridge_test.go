@@ -27,10 +27,8 @@ func TestCreateFullOptions(t *testing.T) {
 
 	// Test this scenario: Default gw address does not belong to
 	// container network and it's greater than bridge address
-	cip, cnw, _ := net.ParseCIDR("172.16.122.0/24")
-	cnw.IP = cip
-	ip, nw, _ := net.ParseCIDR("172.16.0.10/16")
-	nw.IP = ip
+	cnw, _ := types.ParseCIDR("172.16.122.0/24")
+	nw, _ := types.ParseCIDR("172.16.0.10/16")
 	gw := net.ParseIP("172.16.0.1")
 
 	netConfig := &networkConfiguration{
@@ -39,6 +37,7 @@ func TestCreateFullOptions(t *testing.T) {
 		DefaultGatewayIPv4: gw,
 		EnableIPv6:         true,
 	}
+	_, netConfig.AddressIPv6, _ = net.ParseCIDR("2001:db8::/48")
 	genericOption := make(map[string]interface{})
 	genericOption[netlabel.GenericData] = config
 
@@ -64,6 +63,9 @@ func TestCreateFullOptions(t *testing.T) {
 
 	if !cnw.Contains(te.Interface().Address().IP) {
 		t.Fatalf("endpoint got assigned address outside of container network(%s): %s", cnw.String(), te.Interface().Address())
+	}
+	if !nw.Contains(te.Interface().AddressIPv6().IP) {
+		t.Fatalf("endpoint got assigned address outside of container network(%s): %s", nw.String(), te.Interface().AddressIPv6())
 	}
 }
 
@@ -581,6 +583,14 @@ func TestValidateConfig(t *testing.T) {
 
 	// Bridge network
 	_, network, _ := net.ParseCIDR("172.28.0.0/16")
+	c = networkConfiguration{
+		AddressIPv4: network,
+	}
+
+	err = c.Validate()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Test v4 gw
 	c.DefaultGatewayIPv4 = net.ParseIP("172.27.30.234")
@@ -596,9 +606,10 @@ func TestValidateConfig(t *testing.T) {
 	}
 
 	// Test v6 gw
-	_, containerSubnet, _ = net.ParseCIDR("2001:1234:ae:b004::/64")
+	_, v6nw, _ := net.ParseCIDR("2001:1234:ae:b004::/64")
 	c = networkConfiguration{
 		EnableIPv6:         true,
+		AddressIPv6:        v6nw,
 		DefaultGatewayIPv6: net.ParseIP("2001:1234:ac:b004::bad:a55"),
 	}
 	err = c.Validate()
@@ -610,6 +621,18 @@ func TestValidateConfig(t *testing.T) {
 	err = c.Validate()
 	if err != nil {
 		t.Fatalf("Unexpected validation error on v6 default gateway")
+	}
+
+	c.AddressIPv6 = nil
+	err = c.Validate()
+	if err == nil {
+		t.Fatalf("Failed to detect invalid v6 default gateway")
+	}
+
+	c.AddressIPv6 = nil
+	err = c.Validate()
+	if err == nil {
+		t.Fatalf("Failed to detect invalid v6 default gateway")
 	}
 }
 
@@ -641,6 +664,7 @@ func TestSetDefaultGw(t *testing.T) {
 	config := &networkConfiguration{
 		BridgeName:         DefaultBridgeName,
 		EnableIPv6:         true,
+		AddressIPv6:        subnetv6,
 		DefaultGatewayIPv4: gw4,
 		DefaultGatewayIPv6: gw6,
 	}
