@@ -25,6 +25,7 @@ type Config struct {
 type DaemonCfg struct {
 	Debug           bool
 	DataDir         string
+	ExecRoot        string
 	DefaultNetwork  string
 	DefaultDriver   string
 	Labels          []string
@@ -72,6 +73,7 @@ func ParseConfigOptions(cfgOptions ...Option) *Config {
 		Daemon: DaemonCfg{
 			DriverCfg:       make(map[string]interface{}),
 			DisableProvider: make(chan struct{}, 10),
+			ExecRoot:        "/var/run/docker/libnetwork/",
 		},
 		Scopes: make(map[string]*datastore.ScopeCfg),
 	}
@@ -194,6 +196,13 @@ func OptionDiscoveryAddress(address string) Option {
 func OptionDataDir(dataDir string) Option {
 	return func(c *Config) {
 		c.Daemon.DataDir = dataDir
+	}
+}
+
+// OptionExecRoot function returns an option setter for exec root folder
+func OptionExecRoot(execRoot string) Option {
+	return func(c *Config) {
+		c.Daemon.ExecRoot = execRoot
 	}
 }
 
