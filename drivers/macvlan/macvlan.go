@@ -105,11 +105,11 @@ func Init(dc driverapi.DriverCallback, config map[string]interface{}) error {
 }
 
 func (d *driver) NetworkAllocate(id string, option map[string]string, ipV4Data, ipV6Data []driverapi.IPAMData) (map[string]string, error) {
-	return nil, types.NotImplementedErrorf("not implemented")
+	return option, nil
 }
 
 func (d *driver) NetworkFree(id string) error {
-	return types.NotImplementedErrorf("not implemented")
+	return nil
 }
 
 func (d *driver) EndpointOperInfo(nid, eid string) (map[string]interface{}, error) {
