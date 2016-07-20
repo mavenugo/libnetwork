@@ -367,8 +367,9 @@ func (c *controller) agentDriverNotify(d driverapi.Driver) {
 	}
 
 	d.DiscoverNew(discoverapi.NodeDiscovery, discoverapi.NodeDiscoveryData{
-		Address: c.agent.advertiseAddr,
-		Self:    true,
+		Address:     c.agent.advertiseAddr,
+		BindAddress: c.agent.bindAddr,
+		Self:        true,
 	})
 
 	drvEnc := discoverapi.DriverEncryptionConfig{}
