@@ -31,20 +31,21 @@ const (
 var initVxlanIdm = make(chan (bool), 1)
 
 type driver struct {
-	eventCh      chan serf.Event
-	notifyCh     chan ovNotify
-	exitCh       chan chan struct{}
-	bindAddress  string
-	neighIP      string
-	config       map[string]interface{}
-	peerDb       peerNetworkMap
-	serfInstance *serf.Serf
-	networks     networkTable
-	store        datastore.DataStore
-	localStore   datastore.DataStore
-	vxlanIdm     *idm.Idm
-	once         sync.Once
-	joinOnce     sync.Once
+	eventCh          chan serf.Event
+	notifyCh         chan ovNotify
+	exitCh           chan chan struct{}
+	bindAddress      string
+	advertiseAddress string
+	neighIP          string
+	config           map[string]interface{}
+	peerDb           peerNetworkMap
+	serfInstance     *serf.Serf
+	networks         networkTable
+	store            datastore.DataStore
+	localStore       datastore.DataStore
+	vxlanIdm         *idm.Idm
+	once             sync.Once
+	joinOnce         sync.Once
 	sync.Mutex
 }
 
@@ -120,7 +121,11 @@ func (d *driver) restoreEndpoints() error {
 		logrus.Infof("WINOVERLAY: Restore Endpoints: Restoring %s", ep.id)
 		n := d.network(ep.nid)
 		if n == nil {
-			logrus.Debugf("Network (%s) not found for restored endpoint (%s)", ep.nid, ep.id)
+			logrus.Debugf("Network (%s) not found for restored endpoint (%s)", ep.nid[0:7], ep.id[0:7])
+			logrus.Debugf("Deleting stale overlay endpoint (%s) from store", ep.id[0:7])
+			if err := d.deleteEndpointFromStore(ep); err != nil {
+				logrus.Debugf("Failed to delete stale overlay endpoint (%s) from store", ep.id[0:7])
+			}
 			continue
 		}
 		logrus.Info("WINOVERLAY: Restore Endpoints: Network found")
@@ -239,19 +244,20 @@ func validateSelf(node string) error {
 	return fmt.Errorf("Multi-Host overlay networking requires cluster-advertise(%s) to be configured with a local ip-address that is reachable within the cluster", advIP.String())
 }
 
-func (d *driver) nodeJoin(node string, self bool) {
+func (d *driver) nodeJoin(advertiseAddress, bindAddress string, self bool) {
 
 	logrus.Info("WINOVERLAY: Enter nodeJoin")
 
 	if self && !d.isSerfAlive() {
-		if err := validateSelf(node); err != nil {
+		if err := validateSelf(advertiseAddress); err != nil {
 			logrus.Errorf("%s", err.Error())
 		}
 
-		logrus.Infof("WINOVERLAY: nodeJoin local driver bindaddress set to %s", node)
+		logrus.Infof("WINOVERLAY: nodeJoin local driver advertiseAddress/bindAddress set to %s / %s", advertiseAddress, bindAddress)
 
 		d.Lock()
-		d.bindAddress = node
+		d.advertiseAddress = advertiseAddress
+		d.bindAddress = bindAddress
 		d.Unlock()
 
 		// If there is no cluster store there is no need to start serf.
@@ -271,7 +277,7 @@ func (d *driver) nodeJoin(node string, self bool) {
 
 	d.Lock()
 	if !self {
-		d.neighIP = node
+		d.neighIP = advertiseAddress
 	}
 	neighIP := d.neighIP
 	d.Unlock()
@@ -290,7 +296,7 @@ func (d *driver) nodeJoin(node string, self bool) {
 			}
 		})
 		if err != nil {
-			logrus.Errorf("joining serf neighbor %s failed: %v", node, err)
+			logrus.Errorf("joining serf neighbor %s failed: %v", advertiseAddress, err)
 			d.Lock()
 			d.joinOnce = sync.Once{}
 			d.Unlock()
@@ -336,7 +342,7 @@ func (d *driver) DiscoverNew(dType discoverapi.DiscoveryType, data interface{}) 
 		if !ok || nodeData.Address == "" {
 			return fmt.Errorf("invalid discovery data")
 		}
-		d.nodeJoin(nodeData.Address, nodeData.Self)
+		d.nodeJoin(nodeData.Address, nodeData.BindAddress, nodeData.Self)
 	case discoverapi.DatastoreConfig:
 		if d.store != nil {
 			return types.ForbiddenErrorf("cannot accept datastore configuration: Overlay driver has a datastore configured already")
