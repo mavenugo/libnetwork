@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"encoding/json"
+
 	log "github.com/Sirupsen/logrus"
 
 	"github.com/Microsoft/hcsshim"
@@ -270,15 +271,16 @@ func (d *driver) peerAdd(nid, eid string, peerIP net.IP, peerIPMask net.IPMask,
 		log.Info("WINOVERLAY: peerAdd: notifying HNS of the REMOTE endpoint")
 
 		hnsEndpoint := &hcsshim.HNSEndpoint{
-			VirtualNetwork:  n.hnsId,
-			MacAddress:      peerMac.String(),
-			IPAddress:       peerIP,
-			IsLocalEndpoint: false,
+			VirtualNetwork: n.hnsId,
+			MacAddress:     peerMac.String(),
+			IPAddress:      peerIP,
 		}
 
+		IsLocalEndpoint := false
+		hnsEndpoint.IsLocalEndpoint = &IsLocalEndpoint
 		paPolicy, err := json.Marshal(hcsshim.PaPolicy{
 			Type: "PA",
-			PA:   n.providerAddress,
+			PA:   vtep.String(),
 		})
 
 		if err != nil {
