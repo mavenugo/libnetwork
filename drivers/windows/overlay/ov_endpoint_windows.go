@@ -116,9 +116,8 @@ func (d *driver) CreateEndpoint(nid, eid string, ifInfo driverapi.InterfaceInfo,
 	logrus.Info("WINOVERLAY: CreateEndpoint notifying HNS of the local endpoint")
 
 	hnsEndpoint := &hcsshim.HNSEndpoint{
-		VirtualNetwork:  n.hnsId,
-		IPAddress:       ep.addr.IP,
-		IsLocalEndpoint: true,
+		VirtualNetwork: n.hnsId,
+		IPAddress:      ep.addr.IP,
 	}
 
 	if ep.mac != nil {
