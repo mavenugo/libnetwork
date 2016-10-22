@@ -111,6 +111,7 @@ func (d *driver) EventNotify(etype driverapi.EventType, nid, tableName, key stri
 		return
 	}
 
+	logrus.Debugf("PEERS: ===> %s,%s ", peer.TunnelEndpointIP, n.providerAddress)
 	addr, err := types.ParseCIDR(peer.EndpointIP)
 	if err != nil {
 		logrus.Errorf("Invalid peer IP %s received in event notify", peer.EndpointIP)
