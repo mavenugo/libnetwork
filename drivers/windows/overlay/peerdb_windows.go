@@ -271,13 +271,12 @@ func (d *driver) peerAdd(nid, eid string, peerIP net.IP, peerIPMask net.IPMask,
 		log.Info("WINOVERLAY: peerAdd: notifying HNS of the REMOTE endpoint")
 
 		hnsEndpoint := &hcsshim.HNSEndpoint{
-			VirtualNetwork: n.hnsId,
-			MacAddress:     peerMac.String(),
-			IPAddress:      peerIP,
+			VirtualNetwork:   n.hnsId,
+			MacAddress:       peerMac.String(),
+			IPAddress:        peerIP,
+			IsRemoteEndpoint: true,
 		}
 
-		IsLocalEndpoint := false
-		hnsEndpoint.IsLocalEndpoint = &IsLocalEndpoint
 		paPolicy, err := json.Marshal(hcsshim.PaPolicy{
 			Type: "PA",
 			PA:   vtep.String(),
