@@ -13,8 +13,8 @@ import (
 	windowsipam "github.com/docker/libnetwork/ipams/windowsipam"
 )
 
-// InitLinuxDefault registers the built-in ipam service with libnetwork
-func InitLinuxDefault(ic ipamapi.Callback, l, g interface{}) error {
+// InitDockerDefault registers the built-in ipam service with libnetwork
+func InitDockerDefault(ic ipamapi.Callback, l, g interface{}) error {
 	var (
 		ok                bool
 		localDs, globalDs datastore.DataStore
@@ -41,14 +41,14 @@ func InitLinuxDefault(ic ipamapi.Callback, l, g interface{}) error {
 
 	cps := &ipamapi.Capability{RequiresRequestReplay: true}
 
-	return ic.RegisterIpamDriverWithCapabilities("linuxdefault", a, cps)
+	return ic.RegisterIpamDriverWithCapabilities(ipamapi.DefaultIPAM, a, cps)
 }
 
 // Init registers the built-in ipam service with libnetwork
 func Init(ic ipamapi.Callback, l, g interface{}) error {
-	initFunc := windowsipam.GetInit(ipamapi.DefaultIPAM)
+	initFunc := windowsipam.GetInit(windowsipam.DefaultIPAM)
 
-	err := InitLinuxDefault(ic, l, g)
+	err := InitDockerDefault(ic, l, g)
 	if err != nil {
 		return err
 	}
