@@ -327,34 +327,6 @@ func (d *driver) peerAdd(nid, eid string, peerIP net.IP, peerIPMask net.IPMask,
 		n.addEndpoint(ep)
 	}
 
-	sbox := n.sandbox()
-	if sbox == nil {
-		return nil
-	}
-
-	IP := &net.IPNet{
-		IP:   peerIP,
-		Mask: peerIPMask,
-	}
-
-	s := n.getSubnetforIP(IP)
-	if s == nil {
-		return fmt.Errorf("couldn't find the subnet %q in network %q\n", IP.String(), n.id)
-	}
-
-	if err := n.obtainVxlanID(s); err != nil {
-		return fmt.Errorf("couldn't get vxlan id for %q: %v", s.subnetIP.String(), err)
-	}
-
-	if err := n.joinSubnetSandbox(s, false); err != nil {
-		return fmt.Errorf("subnet sandbox join failed for %q: %v", s.subnetIP.String(), err)
-	}
-
-	// Add neighbor entry for the peer IP
-	if err := sbox.AddNeighbor(peerIP, peerMac, sbox.NeighborOptions().LinkName(s.vxlanName)); err != nil {
-		return fmt.Errorf("could not add neigbor entry into the sandbox: %v", err)
-	}
-
 	return nil
 }
 
@@ -391,16 +363,6 @@ func (d *driver) peerDelete(nid, eid string, peerIP net.IP, peerIPMask net.IPMas
 		d.peerDbDelete(nid, eid, peerIP, peerIPMask, peerMac, net.ParseIP(n.providerAddress))
 
 		n.deleteEndpoint(eid)
-	}
-
-	sbox := n.sandbox()
-	if sbox == nil {
-		return nil
-	}
-
-	// Delete neighbor entry for the peer IP
-	if err := sbox.DeleteNeighbor(peerIP, peerMac, true); err != nil {
-		return fmt.Errorf("could not delete neigbor entry into the sandbox: %v", err)
 	}
 
 	return nil

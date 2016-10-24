@@ -20,11 +20,22 @@ type endpoint struct {
 	id        string
 	nid       string
 	profileId string
-	ifName    string
 	mac       net.HardwareAddr
 	addr      *net.IPNet
 	dbExists  bool
 	dbIndex   uint64
+}
+
+func validateID(nid, eid string) error {
+	if nid == "" {
+		return fmt.Errorf("invalid network id")
+	}
+
+	if eid == "" {
+		return fmt.Errorf("invalid endpoint id")
+	}
+
+	return nil
 }
 
 func (n *network) endpoint(eid string) *endpoint {
@@ -98,26 +109,14 @@ func (d *driver) CreateEndpoint(nid, eid string, ifInfo driverapi.InterfaceInfo,
 		return fmt.Errorf("no matching subnet for IP %q in network %q\n", ep.addr, nid)
 	}
 
-	logrus.Info("WINOVERLAY: CreateEndpoint checking on MAC")
-
-	// Not doing this for now as current plan is to let HNS assign the MAC
-	//if ep.mac == nil {
-
-	//logrus.Info("WINOVERLAY: CreateEndpoint generating a MAC")
-
-	//ep.mac = netutils.GenerateMACFromIP(ep.addr.IP)
-	//if err := ifInfo.SetMacAddress(ep.mac); err != nil {
-	//	return err
-	//}
-	//}
-
 	// Todo: Add port bindings and qos policies here
 
 	logrus.Info("WINOVERLAY: CreateEndpoint notifying HNS of the local endpoint")
 
 	hnsEndpoint := &hcsshim.HNSEndpoint{
-		VirtualNetwork: n.hnsId,
-		IPAddress:      ep.addr.IP,
+		VirtualNetwork:    n.hnsId,
+		IPAddress:         ep.addr.IP,
+		EnableInternalDNS: true,
 	}
 
 	if ep.mac != nil {
@@ -227,6 +226,7 @@ func (d *driver) EndpointOperInfo(nid, eid string) (map[string]interface{}, erro
 
 	data := make(map[string]interface{}, 1)
 	data["hnsid"] = ep.profileId
+	data["AllowUnqualifiedDNSQuery"] = true
 	return data, nil
 }
 
@@ -321,9 +321,7 @@ func (ep *endpoint) MarshalJSON() ([]byte, error) {
 	if ep.profileId != "" {
 		epMap["profileId"] = ep.profileId
 	}
-	if ep.ifName != "" {
-		epMap["ifName"] = ep.ifName
-	}
+
 	if ep.addr != nil {
 		epMap["addr"] = ep.addr.String()
 	}
@@ -359,9 +357,5 @@ func (ep *endpoint) UnmarshalJSON(value []byte) error {
 			return types.InternalErrorf("failed to decode endpoint interface ipv4 address after json unmarshal: %v", err)
 		}
 	}
-	if v, ok := epMap["ifName"]; ok {
-		ep.ifName = v.(string)
-	}
-
 	return nil
 }

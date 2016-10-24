@@ -11,9 +11,7 @@ import (
 	"github.com/docker/libnetwork/datastore"
 	"github.com/docker/libnetwork/discoverapi"
 	"github.com/docker/libnetwork/driverapi"
-	"github.com/docker/libnetwork/idm"
 	"github.com/docker/libnetwork/netlabel"
-	"github.com/docker/libnetwork/osl"
 	"github.com/docker/libnetwork/types"
 	"github.com/hashicorp/serf/serf"
 )
@@ -43,7 +41,6 @@ type driver struct {
 	networks         networkTable
 	store            datastore.DataStore
 	localStore       datastore.DataStore
-	vxlanIdm         *idm.Idm
 	once             sync.Once
 	joinOnce         sync.Once
 	sync.Mutex
@@ -56,6 +53,7 @@ func Init(dc driverapi.DriverCallback, config map[string]interface{}) error {
 	c := driverapi.Capability{
 		DataScope: datastore.GlobalScope,
 	}
+
 	d := &driver{
 		networks: networkTable{},
 		peerDb: peerNetworkMap{
@@ -130,36 +128,6 @@ func (d *driver) restoreEndpoints() error {
 		}
 		logrus.Info("WINOVERLAY: Restore Endpoints: Network found")
 		n.addEndpoint(ep)
-
-		s := n.getSubnetforIP(ep.addr)
-		if s == nil {
-			return fmt.Errorf("could not find subnet for endpoint %s", ep.id)
-		}
-		logrus.Info("WINOVERLAY: Restore Endpoints: Subnet found")
-
-		if err := n.joinSandbox(true); err != nil {
-			return fmt.Errorf("restore network sandbox failed: %v", err)
-		}
-
-		if err := n.joinSubnetSandbox(s, true); err != nil {
-			return fmt.Errorf("restore subnet sandbox failed for %q: %v", s.subnetIP.String(), err)
-		}
-
-		logrus.Info("WINOVERLAY: Restore Endpoints: Restored subnet sandbox")
-
-		Ifaces := make(map[string][]osl.IfaceOption)
-		vethIfaceOption := make([]osl.IfaceOption, 1)
-		vethIfaceOption = append(vethIfaceOption, n.sbox.InterfaceOptions().Master(s.brName))
-		Ifaces[fmt.Sprintf("%s+%s", "veth", "veth")] = vethIfaceOption
-
-		err := n.sbox.Restore(Ifaces, nil, nil, nil)
-		if err != nil {
-			return fmt.Errorf("failed to restore overlay sandbox: %v", err)
-		}
-
-		logrus.Info("WINOVERLAY: Restore Endpoints: PeerDB add")
-
-		n.incEndpointCount()
 		d.peerDbAdd(ep.nid, ep.id, ep.addr.IP, ep.addr.Mask, ep.mac, net.ParseIP(n.providerAddress), true)
 	}
 
@@ -188,32 +156,6 @@ func (d *driver) configure() error {
 
 	if d.store == nil {
 		return nil
-	}
-
-	if d.vxlanIdm == nil {
-		return d.initializeVxlanIdm()
-	}
-
-	return nil
-}
-
-func (d *driver) initializeVxlanIdm() error {
-	logrus.Info("WINOVERLAY: Enter initializeVxlanIdm")
-
-	var err error
-
-	initVxlanIdm <- true
-	defer func() { <-initVxlanIdm }()
-
-	if d.vxlanIdm != nil {
-		return nil
-	}
-
-	logrus.Info("WINOVERLAY: initializeVxlanIdm creating a new vxlan id manager")
-
-	d.vxlanIdm, err = idm.New(d.store, "vxlan-id", vxlanIDStart, vxlanIDEnd)
-	if err != nil {
-		return fmt.Errorf("failed to initialize vxlan id manager: %v", err)
 	}
 
 	return nil
