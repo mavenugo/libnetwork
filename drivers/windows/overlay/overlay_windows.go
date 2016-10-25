@@ -11,6 +11,7 @@ import (
 	"github.com/docker/libnetwork/datastore"
 	"github.com/docker/libnetwork/discoverapi"
 	"github.com/docker/libnetwork/driverapi"
+	"github.com/docker/libnetwork/idm"
 	"github.com/docker/libnetwork/netlabel"
 	"github.com/docker/libnetwork/types"
 	"github.com/hashicorp/serf/serf"
@@ -20,10 +21,11 @@ const (
 	networkType  = "overlay"
 	vethPrefix   = "veth"
 	vethLen      = 7
-	vxlanIDStart = 256
+	vxlanIDStart = 4096
 	vxlanIDEnd   = (1 << 24) - 1
 	vxlanPort    = 4789
-	vxlanVethMTU = 1450
+	vxlanEncap   = 50
+	secureOption = "encrypted"
 )
 
 var initVxlanIdm = make(chan (bool), 1)
@@ -41,6 +43,7 @@ type driver struct {
 	networks         networkTable
 	store            datastore.DataStore
 	localStore       datastore.DataStore
+	vxlanIdm         *idm.Idm
 	once             sync.Once
 	joinOnce         sync.Once
 	sync.Mutex
@@ -156,6 +159,28 @@ func (d *driver) configure() error {
 
 	if d.store == nil {
 		return nil
+	}
+
+	if d.vxlanIdm == nil {
+		return d.initializeVxlanIdm()
+	}
+
+	return nil
+}
+
+func (d *driver) initializeVxlanIdm() error {
+	var err error
+
+	initVxlanIdm <- true
+	defer func() { <-initVxlanIdm }()
+
+	if d.vxlanIdm != nil {
+		return nil
+	}
+
+	d.vxlanIdm, err = idm.New(d.store, "vxlan-id", vxlanIDStart, vxlanIDEnd)
+	if err != nil {
+		return fmt.Errorf("failed to initialize vxlan id manager: %v", err)
 	}
 
 	return nil

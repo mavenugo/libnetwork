@@ -123,7 +123,7 @@ func (d *driver) CreateNetwork(id string, option map[string]interface{}, nInfo d
 
 	// If we are getting vnis from libnetwork, either we get for
 	// all subnets or none.
-	if len(vnis) < len(ipV4Data) {
+	if len(vnis) != 0 && len(vnis) < len(ipV4Data) {
 		return fmt.Errorf("insufficient vnis(%d) passed to overlay", len(vnis))
 	}
 
@@ -159,70 +159,10 @@ func (d *driver) CreateNetwork(id string, option map[string]interface{}, nInfo d
 
 	d.addNetwork(n)
 
-	// A non blank hnsid indicates that the network was discovered
-	// from HNS. No need to call HNS if this network was discovered
-	// from HNS
-	if n.hnsId == "" {
-
-		logrus.Infof("WINOVERLAY: CreateNetwork will notify HNS of network id: %s", id)
-
-		subnets := []hcsshim.Subnet{}
-
-		for _, s := range n.subnets {
-			subnet := hcsshim.Subnet{
-				AddressPrefix: s.subnetIP.String(),
-			}
-
-			if s.gwIP != nil {
-				subnet.GatewayAddress = s.gwIP.IP.String()
-			}
-
-			vsidPolicy, err := json.Marshal(hcsshim.VsidPolicy{
-				Type: "VSID",
-				VSID: uint(s.vni),
-			})
-
-			if err != nil {
-				return err
-			}
-
-			subnet.Policies = append(subnet.Policies, vsidPolicy)
-			subnets = append(subnets, subnet)
-		}
-
-		network := &hcsshim.HNSNetwork{
-			Name:               n.name,
-			Type:               d.Type(),
-			Subnets:            subnets,
-			NetworkAdapterName: interfaceName,
-		}
-
-		configurationb, err := json.Marshal(network)
-		if err != nil {
-			return err
-		}
-
-		configuration := string(configurationb)
-		logrus.Infof("HNSNetwork Request =%v", configuration)
-
-		hnsresponse, err := hcsshim.HNSNetworkRequest("POST", "", configuration)
-		if err != nil {
-			return err
-		}
-		n.hnsId = hnsresponse.Id
-		n.providerAddress = hnsresponse.ManagementIP
-		genData["com.docker.network.windowsshim.hnsid"] = n.hnsId
-
-		// Write network to store to persist the providerAddress
-		logrus.Infof("WINOVERLAY: CreateNetwork: Writing network to store again with PA %s", n.providerAddress)
-
-		if err := n.writeToStore(); err != nil {
-			return fmt.Errorf("failed to update data store for network %v: %v", n.id, err)
-		}
-	}
-
+	err := d.findHnsNetwork(n)
+	genData["com.docker.network.windowsshim.hnsid"] = n.hnsId
 	logrus.Infof("WINOVERLAY: CreateNetwork: All done.")
-	return nil
+	return err
 }
 
 func (d *driver) DeleteNetwork(nid string) error {
@@ -250,6 +190,7 @@ func (d *driver) DeleteNetwork(nid string) error {
 	}
 
 	d.deleteNetwork(nid)
+	d.deleteLocalNetworkFromStore(n)
 
 	return nil
 }
@@ -319,55 +260,26 @@ func (d *driver) getNetworkFromStore(nid string) *network {
 
 	logrus.Infof("WINOVERLAY: Notify HNS of existing network with name: %s", n.name)
 
-	subnets := []hcsshim.Subnet{}
-
-	for _, s := range n.subnets {
-		subnet := hcsshim.Subnet{
-			AddressPrefix: s.subnetIP.String(),
-		}
-
-		if s.gwIP != nil {
-			subnet.GatewayAddress = s.gwIP.String()
-		}
-
-		vsidPolicy, err := json.Marshal(hcsshim.VsidPolicy{
-			Type: "VSID",
-			VSID: uint(s.vni),
-		})
-
-		if err != nil {
-			// todo should log error
-			return nil
-		}
-
-		subnet.Policies = append(subnet.Policies, vsidPolicy)
-		subnets = append(subnets, subnet)
-	}
-
-	network := &hcsshim.HNSNetwork{
-		Id:                 n.hnsId,
-		Name:               n.name,
-		Type:               d.Type(),
-		Subnets:            subnets,
-		NetworkAdapterName: n.interfaceName,
-	}
-
-	configurationb, err := json.Marshal(network)
+	err := d.findHnsNetwork(n)
 	if err != nil {
-		// todo should log error
-		return nil
-	}
-
-	configuration := string(configurationb)
-	logrus.Infof("HNSNetwork Request =%v", configuration)
-
-	_, err = hcsshim.HNSNetworkRequest("POST", "", configuration)
-	if err != nil {
-		// todo should log error
+		logrus.Errorf("Failed to find hns network: %v", err)
 		return nil
 	}
 
 	return n
+}
+
+func (n *network) vxlanID(s *subnet) uint32 {
+	n.Lock()
+	defer n.Unlock()
+
+	return s.vni
+}
+
+func (n *network) setVxlanID(s *subnet, vni uint32) {
+	n.Lock()
+	s.vni = vni
+	n.Unlock()
 }
 
 func (n *network) Key() []string {
@@ -399,8 +311,8 @@ func (n *network) Value() []byte {
 
 	m["secure"] = n.secure
 	m["subnets"] = netJSON
-	m["providerAddress"] = n.providerAddress
 	m["interfaceName"] = n.interfaceName
+	m["providerAddress"] = n.providerAddress
 	m["hnsId"] = n.hnsId
 	m["name"] = n.name
 	b, err = json.Marshal(m)
@@ -514,6 +426,72 @@ func (n *network) writeToStore() error {
 	logrus.Info("WINOVERLAY: writeToStore putting atomic object")
 
 	return n.driver.store.PutObjectAtomic(n)
+}
+
+func (n *network) releaseVxlanID() ([]uint32, error) {
+	if len(n.subnets) == 0 {
+		return nil, nil
+	}
+
+	if n.driver.store != nil {
+		if err := n.driver.store.DeleteObjectAtomic(n); err != nil {
+			if err == datastore.ErrKeyModified || err == datastore.ErrKeyNotFound {
+				// In both the above cases we can safely assume that the key has been removed by some other
+				// instance and so simply get out of here
+				return nil, nil
+			}
+
+			return nil, fmt.Errorf("failed to delete network to vxlan id map: %v", err)
+		}
+	}
+	var vnis []uint32
+	for _, s := range n.subnets {
+		if n.driver.vxlanIdm != nil {
+			vni := n.vxlanID(s)
+			vnis = append(vnis, vni)
+			n.driver.vxlanIdm.Release(uint64(vni))
+		}
+
+		n.setVxlanID(s, 0)
+	}
+
+	return vnis, nil
+}
+
+func (n *network) obtainVxlanID(s *subnet) error {
+	//return if the subnet already has a vxlan id assigned
+	if s.vni != 0 {
+		return nil
+	}
+
+	if n.driver.store == nil {
+		return fmt.Errorf("no valid vxlan id and no datastore configured, cannot obtain vxlan id")
+	}
+
+	for {
+		if err := n.driver.store.GetObject(datastore.Key(n.Key()...), n); err != nil {
+			return fmt.Errorf("getting network %q from datastore failed %v", n.id, err)
+		}
+
+		if s.vni == 0 {
+			vxlanID, err := n.driver.vxlanIdm.GetID()
+			if err != nil {
+				return fmt.Errorf("failed to allocate vxlan id: %v", err)
+			}
+
+			n.setVxlanID(s, uint32(vxlanID))
+			if err := n.writeToStore(); err != nil {
+				n.driver.vxlanIdm.Release(uint64(n.vxlanID(s)))
+				n.setVxlanID(s, 0)
+				if err == datastore.ErrKeyModified {
+					continue
+				}
+				return fmt.Errorf("network %q failed to update data store: %v", n.id, err)
+			}
+			return nil
+		}
+		return nil
+	}
 }
 
 // contains return true if the passed ip belongs to one the network's
