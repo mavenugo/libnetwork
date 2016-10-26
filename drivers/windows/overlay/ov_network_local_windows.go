@@ -24,19 +24,11 @@ type localNetwork struct {
 func (d *driver) findHnsNetwork(n *network) error {
 	ln, err := d.getLocalNetworkFromStore(n.id)
 
-	logrus.Infof("WINOVERLAY: Finding localnetwork  network id: %s", n.id)
 	if err != nil {
 		return err
 	}
 
 	if ln == nil {
-		logrus.Infof("WINOVERLAY: localnetwork  not found id: %s", n.id)
-		// A non blank hnsid indicates that the network was discovered
-		// from HNS. No need to call HNS if this network was discovered
-		// from HNS
-
-		logrus.Infof("WINOVERLAY: CreateNetwork will notify HNS of network id: %s", n.id)
-
 		subnets := []hcsshim.Subnet{}
 
 		for _, s := range n.subnets {
@@ -84,14 +76,11 @@ func (d *driver) findHnsNetwork(n *network) error {
 		n.hnsId = hnsresponse.Id
 		n.providerAddress = hnsresponse.ManagementIP
 
-		// Write network to store to persist the providerAddress
-		logrus.Infof("WINOVERLAY: CreateNetwork: Writing network to store again with PA %s", n.providerAddress)
-
+		// Save local host specific info
 		if err := d.writeLocalNetworkToStore(n); err != nil {
 			return fmt.Errorf("failed to update data store for network %v: %v", n.id, err)
 		}
 	} else {
-		logrus.Infof("WINOVERLAY: localnetwork  found id: %s", n.id)
 		n.hnsId = ln.hnsID
 		n.providerAddress = ln.providerAddress
 	}
@@ -123,7 +112,7 @@ func (d *driver) deleteLocalNetworkFromStore(n *network) error {
 	if err != nil {
 		return err
 	}
-	logrus.Infof("WINOVERLAY: Deleting localnetwork  id: %s", n.id)
+
 	if err = d.localStore.DeleteObjectAtomic(ln); err != nil {
 		return err
 	}
@@ -142,7 +131,6 @@ func (d *driver) writeLocalNetworkToStore(n *network) error {
 		providerAddress: n.providerAddress,
 	}
 
-	logrus.Infof("WINOVERLAY: Storing localnetwork  id: %s", n.id)
 	if err := d.localStore.PutObjectAtomic(ln); err != nil {
 		return err
 	}

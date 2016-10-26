@@ -12,9 +12,6 @@ import (
 
 // Join method is invoked when a Sandbox is attached to an endpoint.
 func (d *driver) Join(nid, eid string, sboxKey string, jinfo driverapi.JoinInfo, options map[string]interface{}) error {
-
-	logrus.Info("WINOVERLAY: Enter Join")
-
 	if err := validateID(nid, eid); err != nil {
 		return err
 	}
@@ -32,9 +29,6 @@ func (d *driver) Join(nid, eid string, sboxKey string, jinfo driverapi.JoinInfo,
 	if err := d.writeEndpointToStore(ep); err != nil {
 		return fmt.Errorf("failed to update overlay endpoint %s to local data store: %v", ep.id[0:7], err)
 	}
-
-	d.peerDbAdd(nid, eid, ep.addr.IP, ep.addr.Mask, ep.mac,
-		net.ParseIP(n.providerAddress), true)
 
 	buf, err := proto.Marshal(&PeerRecord{
 		EndpointIP:       ep.addr.String(),
@@ -82,7 +76,6 @@ func (d *driver) EventNotify(etype driverapi.EventType, nid, tableName, key stri
 		return
 	}
 
-	logrus.Debugf("PEERS: ===> %s,%s ", peer.TunnelEndpointIP, n.providerAddress)
 	addr, err := types.ParseCIDR(peer.EndpointIP)
 	if err != nil {
 		logrus.Errorf("Invalid peer IP %s received in event notify", peer.EndpointIP)
@@ -115,24 +108,7 @@ func (d *driver) Leave(nid, eid string) error {
 		return err
 	}
 
-	n := d.network(nid)
-	if n == nil {
-		return fmt.Errorf("could not find network with id %s", nid)
-	}
-
-	ep := n.endpoint(eid)
-
-	if ep == nil {
-		return types.InternalMaskableErrorf("could not find endpoint with id %s", eid)
-	}
-
-	if d.notifyCh != nil {
-		d.notifyCh <- ovNotify{
-			action: "leave",
-			nw:     n,
-			ep:     ep,
-		}
-	}
+	d.pushLocalEndpointEvent("leave", nid, eid)
 
 	return nil
 }

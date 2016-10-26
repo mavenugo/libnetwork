@@ -54,12 +54,10 @@ type network struct {
 }
 
 func (d *driver) NetworkAllocate(id string, option map[string]string, ipV4Data, ipV6Data []driverapi.IPAMData) (map[string]string, error) {
-	logrus.Info("WINOVERLAY: Enter NetworkAllocate")
 	return nil, types.NotImplementedErrorf("not implemented")
 }
 
 func (d *driver) NetworkFree(id string) error {
-	logrus.Info("WINOVERLAY: Enter NetworkFree")
 	return types.NotImplementedErrorf("not implemented")
 }
 
@@ -68,8 +66,6 @@ func (d *driver) CreateNetwork(id string, option map[string]interface{}, nInfo d
 		networkName   string
 		interfaceName string
 	)
-
-	logrus.Info("WINOVERLAY: Enter CreateNetwork")
 
 	if id == "" {
 		return fmt.Errorf("invalid network id")
@@ -161,13 +157,11 @@ func (d *driver) CreateNetwork(id string, option map[string]interface{}, nInfo d
 
 	err := d.findHnsNetwork(n)
 	genData["com.docker.network.windowsshim.hnsid"] = n.hnsId
-	logrus.Infof("WINOVERLAY: CreateNetwork: All done.")
+
 	return err
 }
 
 func (d *driver) DeleteNetwork(nid string) error {
-	logrus.Info("WINOVERLAY: Enter DeleteNetwork")
-
 	if nid == "" {
 		return fmt.Errorf("invalid network id")
 	}
@@ -181,8 +175,6 @@ func (d *driver) DeleteNetwork(nid string) error {
 	if n == nil {
 		return fmt.Errorf("could not find network with id %s", nid)
 	}
-
-	logrus.Infof("WINOVERLAY: DeleteNetwork calling HNS with ID %v", n.hnsId)
 
 	_, err := hcsshim.HNSNetworkRequest("DELETE", n.hnsId, "")
 	if err != nil {
@@ -204,27 +196,18 @@ func (d *driver) RevokeExternalConnectivity(nid, eid string) error {
 }
 
 func (d *driver) addNetwork(n *network) {
-
-	logrus.Info("WINOVERLAY: Enter addNetwork")
-
 	d.Lock()
 	d.networks[n.id] = n
 	d.Unlock()
 }
 
 func (d *driver) deleteNetwork(nid string) {
-
-	logrus.Info("WINOVERLAY: Enter deleteNetwork")
-
 	d.Lock()
 	delete(d.networks, nid)
 	d.Unlock()
 }
 
 func (d *driver) network(nid string) *network {
-
-	logrus.Info("WINOVERLAY: Enter network")
-
 	d.Lock()
 	networks := d.networks
 	d.Unlock()
@@ -243,9 +226,6 @@ func (d *driver) network(nid string) *network {
 }
 
 func (d *driver) getNetworkFromStore(nid string) *network {
-
-	logrus.Info("WINOVERLAY: Enter getNetworkFromStore")
-
 	if d.store == nil {
 		return nil
 	}
@@ -256,10 +236,6 @@ func (d *driver) getNetworkFromStore(nid string) *network {
 	}
 
 	// As the network is being discovered from the global store, HNS may not be aware of it yet
-	// Todo - this is code duplication from CreateNetwork, move to helper function
-
-	logrus.Infof("WINOVERLAY: Notify HNS of existing network with name: %s", n.name)
-
 	err := d.findHnsNetwork(n)
 	if err != nil {
 		logrus.Errorf("Failed to find hns network: %v", err)
@@ -415,15 +391,9 @@ func (n *network) DataScope() string {
 }
 
 func (n *network) writeToStore() error {
-
-	logrus.Info("WINOVERLAY: Enter writeToStore")
-
 	if n.driver.store == nil {
-		logrus.Info("WINOVERLAY: writeToStore returning nil due to no driver.store")
 		return nil
 	}
-
-	logrus.Info("WINOVERLAY: writeToStore putting atomic object")
 
 	return n.driver.store.PutObjectAtomic(n)
 }
@@ -508,9 +478,6 @@ func (n *network) contains(ip net.IP) bool {
 
 // getSubnetforIP returns the subnet to which the given IP belongs
 func (n *network) getSubnetforIP(ip *net.IPNet) *subnet {
-
-	logrus.Info("WINOVERLAY: Enter getSubnetForIP")
-
 	for _, s := range n.subnets {
 		// first check if the mask lengths are the same
 		i, _ := s.subnetIP.Mask.Size()
@@ -527,9 +494,6 @@ func (n *network) getSubnetforIP(ip *net.IPNet) *subnet {
 
 // getMatchingSubnet return the network's subnet that matches the input
 func (n *network) getMatchingSubnet(ip *net.IPNet) *subnet {
-
-	logrus.Info("WINOVERLAY: Enter getMatchingSubnet")
-
 	if ip == nil {
 		return nil
 	}
