@@ -132,54 +132,6 @@ func (d *driver) processEvent(u serf.UserEvent) {
 	}
 }
 
-func (d *driver) processQuery(q *serf.Query) {
-	logrus.Debugf("Received query name:%s, payload:%s\n", q.Name,
-		string(q.Payload))
-
-	var nid, ipStr string
-	if _, err := fmt.Sscan(string(q.Payload), &nid, &ipStr); err != nil {
-		fmt.Printf("Failed to scan query payload string: %v\n", err)
-	}
-
-	peerMac, peerIPMask, vtep, err := d.peerDbSearch(nid, net.ParseIP(ipStr))
-	if err != nil {
-		return
-	}
-
-	q.Respond([]byte(fmt.Sprintf("%s %s %s", peerMac.String(), net.IP(peerIPMask).String(), vtep.String())))
-}
-
-func (d *driver) resolvePeer(nid string, peerIP net.IP) (net.HardwareAddr, net.IPMask, net.IP, error) {
-	if d.serfInstance == nil {
-		return nil, nil, nil, fmt.Errorf("could not resolve peer: serf instance not initialized")
-	}
-
-	qPayload := fmt.Sprintf("%s %s", string(nid), peerIP.String())
-	resp, err := d.serfInstance.Query("peerlookup", []byte(qPayload), nil)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("resolving peer by querying the cluster failed: %v", err)
-	}
-
-	respCh := resp.ResponseCh()
-	select {
-	case r := <-respCh:
-		var macStr, maskStr, vtepStr string
-		if _, err := fmt.Sscan(string(r.Payload), &macStr, &maskStr, &vtepStr); err != nil {
-			return nil, nil, nil, fmt.Errorf("bad response %q for the resolve query: %v", string(r.Payload), err)
-		}
-
-		mac, err := net.ParseMAC(macStr)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to parse mac: %v", err)
-		}
-
-		return mac, net.IPMask(net.ParseIP(maskStr).To4()), net.ParseIP(vtepStr), nil
-
-	case <-time.After(time.Second):
-		return nil, nil, nil, fmt.Errorf("timed out resolving peer by querying the cluster")
-	}
-}
-
 func (d *driver) startSerfLoop(eventCh chan serf.Event, notifyCh chan ovNotify,
 	exitCh chan chan struct{}) {
 
@@ -207,12 +159,6 @@ func (d *driver) startSerfLoop(eventCh chan serf.Event, notifyCh chan ovNotify,
 			if !ok {
 				break
 			}
-
-			if e.EventType() == serf.EventQuery {
-				d.processQuery(e.(*serf.Query))
-				break
-			}
-
 			u, ok := e.(serf.UserEvent)
 			if !ok {
 				break

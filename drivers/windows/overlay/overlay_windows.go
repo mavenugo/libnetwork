@@ -7,13 +7,13 @@ import (
 	"net"
 	"sync"
 
+	"github.com/Microsoft/hcsshim"
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/libnetwork/datastore"
 	"github.com/docker/libnetwork/discoverapi"
 	"github.com/docker/libnetwork/driverapi"
 	"github.com/docker/libnetwork/idm"
 	"github.com/docker/libnetwork/netlabel"
-	"github.com/docker/libnetwork/osl"
 	"github.com/docker/libnetwork/types"
 	"github.com/hashicorp/serf/serf"
 )
@@ -22,10 +22,11 @@ const (
 	networkType  = "overlay"
 	vethPrefix   = "veth"
 	vethLen      = 7
-	vxlanIDStart = 256
+	vxlanIDStart = 4096
 	vxlanIDEnd   = (1 << 24) - 1
 	vxlanPort    = 4789
-	vxlanVethMTU = 1450
+	vxlanEncap   = 50
+	secureOption = "encrypted"
 )
 
 var initVxlanIdm = make(chan (bool), 1)
@@ -38,7 +39,6 @@ type driver struct {
 	advertiseAddress string
 	neighIP          string
 	config           map[string]interface{}
-	peerDb           peerNetworkMap
 	serfInstance     *serf.Serf
 	networks         networkTable
 	store            datastore.DataStore
@@ -51,21 +51,16 @@ type driver struct {
 
 // Init registers a new instance of overlay driver
 func Init(dc driverapi.DriverCallback, config map[string]interface{}) error {
-	logrus.Info("WINOVERLAY: Enter Init")
-
 	c := driverapi.Capability{
 		DataScope: datastore.GlobalScope,
 	}
+
 	d := &driver{
 		networks: networkTable{},
-		peerDb: peerNetworkMap{
-			mp: map[string]*peerMap{},
-		},
-		config: config,
+		config:   config,
 	}
 
 	if data, ok := config[netlabel.GlobalKVClient]; ok {
-		logrus.Info("WINOVERLAY: Inside GlobalKVCClient")
 		var err error
 		dsc, ok := data.(discoverapi.DatastoreConfigData)
 		if !ok {
@@ -78,7 +73,6 @@ func Init(dc driverapi.DriverCallback, config map[string]interface{}) error {
 	}
 
 	if data, ok := config[netlabel.LocalKVClient]; ok {
-		logrus.Info("WINOVERLAY: Inside LocalKVCClient")
 		var err error
 		dsc, ok := data.(discoverapi.DatastoreConfigData)
 		if !ok {
@@ -92,15 +86,11 @@ func Init(dc driverapi.DriverCallback, config map[string]interface{}) error {
 
 	d.restoreEndpoints()
 
-	logrus.Info("WINOVERLAY: Exit Init")
-
 	return dc.RegisterDriver(networkType, d, c)
 }
 
 // Endpoints are stored in the local store. Restore them and reconstruct the overlay sandbox
 func (d *driver) restoreEndpoints() error {
-	logrus.Info("WINOVERLAY: Enter Restore Endpoints")
-
 	if d.localStore == nil {
 		logrus.Warnf("Cannot restore overlay endpoints because local datastore is missing")
 		return nil
@@ -111,67 +101,36 @@ func (d *driver) restoreEndpoints() error {
 	}
 
 	if err == datastore.ErrKeyNotFound {
-		logrus.Info("WINOVERLAY: Restore Endpoints: None to restore.")
-
 		return nil
 	}
 
 	for _, kvo := range kvol {
 		ep := kvo.(*endpoint)
-		logrus.Infof("WINOVERLAY: Restore Endpoints: Restoring %s", ep.id)
+
 		n := d.network(ep.nid)
-		if n == nil {
-			logrus.Debugf("Network (%s) not found for restored endpoint (%s)", ep.nid[0:7], ep.id[0:7])
-			logrus.Debugf("Deleting stale overlay endpoint (%s) from store", ep.id[0:7])
+		if n == nil || ep.remote {
+			if !ep.remote {
+				logrus.Debugf("Network (%s) not found for restored endpoint (%s)", ep.nid[0:7], ep.id[0:7])
+				logrus.Debugf("Deleting stale overlay endpoint (%s) from store", ep.id[0:7])
+			}
+
+			hcsshim.HNSEndpointRequest("DELETE", ep.profileId, "")
+
 			if err := d.deleteEndpointFromStore(ep); err != nil {
 				logrus.Debugf("Failed to delete stale overlay endpoint (%s) from store", ep.id[0:7])
 			}
+
 			continue
 		}
-		logrus.Info("WINOVERLAY: Restore Endpoints: Network found")
+
 		n.addEndpoint(ep)
-
-		s := n.getSubnetforIP(ep.addr)
-		if s == nil {
-			return fmt.Errorf("could not find subnet for endpoint %s", ep.id)
-		}
-		logrus.Info("WINOVERLAY: Restore Endpoints: Subnet found")
-
-		if err := n.joinSandbox(true); err != nil {
-			return fmt.Errorf("restore network sandbox failed: %v", err)
-		}
-
-		if err := n.joinSubnetSandbox(s, true); err != nil {
-			return fmt.Errorf("restore subnet sandbox failed for %q: %v", s.subnetIP.String(), err)
-		}
-
-		logrus.Info("WINOVERLAY: Restore Endpoints: Restored subnet sandbox")
-
-		Ifaces := make(map[string][]osl.IfaceOption)
-		vethIfaceOption := make([]osl.IfaceOption, 1)
-		vethIfaceOption = append(vethIfaceOption, n.sbox.InterfaceOptions().Master(s.brName))
-		Ifaces[fmt.Sprintf("%s+%s", "veth", "veth")] = vethIfaceOption
-
-		err := n.sbox.Restore(Ifaces, nil, nil, nil)
-		if err != nil {
-			return fmt.Errorf("failed to restore overlay sandbox: %v", err)
-		}
-
-		logrus.Info("WINOVERLAY: Restore Endpoints: PeerDB add")
-
-		n.incEndpointCount()
-		d.peerDbAdd(ep.nid, ep.id, ep.addr.IP, ep.addr.Mask, ep.mac, net.ParseIP(n.providerAddress), true)
 	}
-
-	logrus.Info("WINOVERLAY: Exit Restore Endpoints")
 
 	return nil
 }
 
 // Fini cleans up the driver resources
 func Fini(drv driverapi.Driver) {
-	logrus.Info("WINOVERLAY: Enter Fini")
-
 	d := drv.(*driver)
 
 	if d.exitCh != nil {
@@ -184,8 +143,6 @@ func Fini(drv driverapi.Driver) {
 }
 
 func (d *driver) configure() error {
-	logrus.Info("WINOVERLAY: Enter configure")
-
 	if d.store == nil {
 		return nil
 	}
@@ -198,8 +155,6 @@ func (d *driver) configure() error {
 }
 
 func (d *driver) initializeVxlanIdm() error {
-	logrus.Info("WINOVERLAY: Enter initializeVxlanIdm")
-
 	var err error
 
 	initVxlanIdm <- true
@@ -208,8 +163,6 @@ func (d *driver) initializeVxlanIdm() error {
 	if d.vxlanIdm != nil {
 		return nil
 	}
-
-	logrus.Info("WINOVERLAY: initializeVxlanIdm creating a new vxlan id manager")
 
 	d.vxlanIdm, err = idm.New(d.store, "vxlan-id", vxlanIDStart, vxlanIDEnd)
 	if err != nil {
@@ -224,8 +177,6 @@ func (d *driver) Type() string {
 }
 
 func validateSelf(node string) error {
-	logrus.Info("WINOVERLAY: Enter validateSelf")
-
 	advIP := net.ParseIP(node)
 	if advIP == nil {
 		return fmt.Errorf("invalid self address (%s)", node)
@@ -245,15 +196,10 @@ func validateSelf(node string) error {
 }
 
 func (d *driver) nodeJoin(advertiseAddress, bindAddress string, self bool) {
-
-	logrus.Info("WINOVERLAY: Enter nodeJoin")
-
 	if self && !d.isSerfAlive() {
 		if err := validateSelf(advertiseAddress); err != nil {
 			logrus.Errorf("%s", err.Error())
 		}
-
-		logrus.Infof("WINOVERLAY: nodeJoin local driver advertiseAddress/bindAddress set to %s / %s", advertiseAddress, bindAddress)
 
 		d.Lock()
 		d.advertiseAddress = advertiseAddress
@@ -262,9 +208,6 @@ func (d *driver) nodeJoin(advertiseAddress, bindAddress string, self bool) {
 
 		// If there is no cluster store there is no need to start serf.
 		if d.store != nil {
-
-			logrus.Info("WINOVERLAY: nodeJoin There is a cluster, doing serfInit")
-
 			err := d.serfInit()
 			if err != nil {
 				logrus.Errorf("initializing serf instance failed: %v", err)
@@ -273,8 +216,6 @@ func (d *driver) nodeJoin(advertiseAddress, bindAddress string, self bool) {
 		}
 	}
 
-	logrus.Infof("WINOVERLAY: nodeJoin done with self setup")
-
 	d.Lock()
 	if !self {
 		d.neighIP = advertiseAddress
@@ -282,12 +223,7 @@ func (d *driver) nodeJoin(advertiseAddress, bindAddress string, self bool) {
 	neighIP := d.neighIP
 	d.Unlock()
 
-	logrus.Infof("WINOVERLAY: nodeJoin neighIP is %s", neighIP)
-
 	if d.serfInstance != nil && neighIP != "" {
-
-		logrus.Infof("WINOVERLAY: nodeJoin wow doing serfJoin for neighIP")
-
 		var err error
 		d.joinOnce.Do(func() {
 			err = d.serfJoin(neighIP)
@@ -306,9 +242,6 @@ func (d *driver) nodeJoin(advertiseAddress, bindAddress string, self bool) {
 }
 
 func (d *driver) pushLocalEndpointEvent(action, nid, eid string) {
-
-	logrus.Info("WINOVERLAY: Enter pushLocalEndpointEvent")
-
 	n := d.network(nid)
 	if n == nil {
 		logrus.Debugf("Error pushing local endpoint event for network %s", nid)
@@ -324,7 +257,7 @@ func (d *driver) pushLocalEndpointEvent(action, nid, eid string) {
 		return
 	}
 	d.notifyCh <- ovNotify{
-		action: "join",
+		action: action,
 		nw:     n,
 		ep:     ep,
 	}
@@ -332,8 +265,6 @@ func (d *driver) pushLocalEndpointEvent(action, nid, eid string) {
 
 // DiscoverNew is a notification for a new discovery event, such as a new node joining a cluster
 func (d *driver) DiscoverNew(dType discoverapi.DiscoveryType, data interface{}) error {
-
-	logrus.Info("WINOVERLAY: Enter DiscoverNew")
 
 	var err error
 	switch dType {
@@ -362,8 +293,5 @@ func (d *driver) DiscoverNew(dType discoverapi.DiscoveryType, data interface{}) 
 
 // DiscoverDelete is a notification for a discovery delete event, such as a node leaving a cluster
 func (d *driver) DiscoverDelete(dType discoverapi.DiscoveryType, data interface{}) error {
-
-	logrus.Info("WINOVERLAY: Enter DiscoverDelete")
-
 	return nil
 }

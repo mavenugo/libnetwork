@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,29 +13,21 @@ import (
 	"github.com/docker/libnetwork/datastore"
 	"github.com/docker/libnetwork/driverapi"
 	"github.com/docker/libnetwork/netlabel"
-	"github.com/docker/libnetwork/netutils"
-	"github.com/docker/libnetwork/osl"
-	"github.com/docker/libnetwork/resolvconf"
 	"github.com/docker/libnetwork/types"
 )
 
 var (
-	hostMode    bool
-	networkOnce sync.Once
-	networkMu   sync.Mutex
-	vniTbl      = make(map[uint32]string)
+	hostMode  bool
+	networkMu sync.Mutex
 )
 
 type networkTable map[string]*network
 
 type subnet struct {
-	once      *sync.Once
-	vxlanName string
-	brName    string
-	vni       uint32
-	initErr   error
-	subnetIP  *net.IPNet
-	gwIP      *net.IPNet
+	vni      uint32
+	initErr  error
+	subnetIP *net.IPNet
+	gwIP     *net.IPNet
 }
 
 type subnetJSON struct {
@@ -52,13 +42,10 @@ type network struct {
 	hnsId           string
 	dbIndex         uint64
 	dbExists        bool
-	sbox            osl.Sandbox
 	providerAddress string
 	interfaceName   string
 	endpoints       endpointTable
 	driver          *driver
-	joinCnt         int
-	once            *sync.Once
 	initEpoch       int
 	initErr         error
 	subnets         []*subnet
@@ -67,12 +54,10 @@ type network struct {
 }
 
 func (d *driver) NetworkAllocate(id string, option map[string]string, ipV4Data, ipV6Data []driverapi.IPAMData) (map[string]string, error) {
-	logrus.Info("WINOVERLAY: Enter NetworkAllocate")
 	return nil, types.NotImplementedErrorf("not implemented")
 }
 
 func (d *driver) NetworkFree(id string) error {
-	logrus.Info("WINOVERLAY: Enter NetworkFree")
 	return types.NotImplementedErrorf("not implemented")
 }
 
@@ -81,8 +66,6 @@ func (d *driver) CreateNetwork(id string, option map[string]interface{}, nInfo d
 		networkName   string
 		interfaceName string
 	)
-
-	logrus.Info("WINOVERLAY: Enter CreateNetwork")
 
 	if id == "" {
 		return fmt.Errorf("invalid network id")
@@ -101,15 +84,14 @@ func (d *driver) CreateNetwork(id string, option map[string]interface{}, nInfo d
 	}
 
 	n := &network{
-		id:              id,
-		driver:          d,
-		endpoints:       endpointTable{},
-		once:            &sync.Once{},
-		subnets:         []*subnet{},
-		providerAddress: d.bindAddress,
+		id:        id,
+		driver:    d,
+		endpoints: endpointTable{},
+		subnets:   []*subnet{},
 	}
 
 	genData, ok := option[netlabel.GenericData].(map[string]string)
+
 	if !ok {
 		return fmt.Errorf("Unknown generic data option")
 	}
@@ -145,7 +127,6 @@ func (d *driver) CreateNetwork(id string, option map[string]interface{}, nInfo d
 		s := &subnet{
 			subnetIP: ipd.Pool,
 			gwIP:     ipd.Gateway,
-			once:     &sync.Once{},
 		}
 
 		if len(vnis) != 0 {
@@ -174,82 +155,13 @@ func (d *driver) CreateNetwork(id string, option map[string]interface{}, nInfo d
 
 	d.addNetwork(n)
 
-	// A non blank hnsid indicates that the network was discovered
-	// from HNS. No need to call HNS if this network was discovered
-	// from HNS
-	if n.hnsId == "" {
+	err := d.findHnsNetwork(n)
+	genData["com.docker.network.windowsshim.hnsid"] = n.hnsId
 
-		logrus.Infof("WINOVERLAY: CreateNetwork will notify HNS of network id: %s", id)
-
-		subnets := []hcsshim.Subnet{}
-
-		for _, s := range n.subnets {
-			subnet := hcsshim.Subnet{
-				AddressPrefix: s.subnetIP.String(),
-			}
-
-			if s.gwIP != nil {
-				subnet.GatewayAddress = s.gwIP.IP.String()
-			}
-
-			//  if we don't have a vni for the subnet, obtain one now
-			if s.vni == 0 {
-				if err := n.obtainVxlanID(s); err != nil {
-					return fmt.Errorf("couldn't get vxlan id for %q: %v", s.subnetIP.String(), err)
-				}
-			}
-
-			vsidPolicy, err := json.Marshal(hcsshim.VsidPolicy{
-				Type: "VSID",
-				VSID: uint(s.vni),
-			})
-
-			if err != nil {
-				return err
-			}
-
-			subnet.Policies = append(subnet.Policies, vsidPolicy)
-			subnets = append(subnets, subnet)
-		}
-
-		network := &hcsshim.HNSNetwork{
-			Name:               n.name,
-			Type:               d.Type(),
-			Subnets:            subnets,
-			NetworkAdapterName: interfaceName,
-		}
-
-		configurationb, err := json.Marshal(network)
-		if err != nil {
-			return err
-		}
-
-		configuration := string(configurationb)
-		logrus.Infof("HNSNetwork Request =%v", configuration)
-
-		hnsresponse, err := hcsshim.HNSNetworkRequest("POST", "", configuration)
-		if err != nil {
-			return err
-		}
-		n.hnsId = hnsresponse.Id
-		n.providerAddress = hnsresponse.ManagementIP
-		genData["com.docker.network.windowsshim.hnsid"] = n.hnsId
-
-		// Write network to store to persist the providerAddress
-		logrus.Infof("WINOVERLAY: CreateNetwork: Writing network to store again with PA %s", n.providerAddress)
-
-		if err := n.writeToStore(); err != nil {
-			return fmt.Errorf("failed to update data store for network %v: %v", n.id, err)
-		}
-	}
-
-	logrus.Infof("WINOVERLAY: CreateNetwork: All done.")
-	return nil
+	return err
 }
 
 func (d *driver) DeleteNetwork(nid string) error {
-	logrus.Info("WINOVERLAY: Enter DeleteNetwork")
-
 	if nid == "" {
 		return fmt.Errorf("invalid network id")
 	}
@@ -264,19 +176,13 @@ func (d *driver) DeleteNetwork(nid string) error {
 		return fmt.Errorf("could not find network with id %s", nid)
 	}
 
-	logrus.Infof("WINOVERLAY: DeleteNetwork calling HNS with ID %v", n.hnsId)
-
 	_, err := hcsshim.HNSNetworkRequest("DELETE", n.hnsId, "")
 	if err != nil {
 		return err
 	}
 
 	d.deleteNetwork(nid)
-
-	_, err = n.releaseVxlanID()
-	if err != nil {
-		return err
-	}
+	d.deleteLocalNetworkFromStore(n)
 
 	return nil
 }
@@ -289,351 +195,19 @@ func (d *driver) RevokeExternalConnectivity(nid, eid string) error {
 	return nil
 }
 
-func (n *network) incEndpointCount() {
-	n.Lock()
-	defer n.Unlock()
-	n.joinCnt++
-}
-
-func (n *network) joinSandbox(restore bool) error {
-	logrus.Infof("WINOVERLAY: Enter joinSandbox with restore=%s", restore)
-
-	// If there is a race between two go routines here only one will win
-	// the other will wait.
-	n.once.Do(func() {
-		// save the error status of initSandbox in n.initErr so that
-		// all the racing go routines are able to know the status.
-		n.initErr = n.initSandbox(restore)
-	})
-
-	return n.initErr
-}
-
-func (n *network) joinSubnetSandbox(s *subnet, restore bool) error {
-	logrus.Info("WINOVERLAY: Enter joinSubnetSandbox")
-
-	s.once.Do(func() {
-		s.initErr = n.initSubnetSandbox(s, restore)
-	})
-	return s.initErr
-}
-
-func (n *network) leaveSandbox() {
-	logrus.Info("WINOVERLAY: Enter leaveSandbox")
-
-	n.Lock()
-	defer n.Unlock()
-	n.joinCnt--
-	if n.joinCnt != 0 {
-		return
-	}
-
-	// We are about to destroy sandbox since the container is leaving the network
-	// Reinitialize the once variable so that we will be able to trigger one time
-	// sandbox initialization(again) when another container joins subsequently.
-	n.once = &sync.Once{}
-	for _, s := range n.subnets {
-		s.once = &sync.Once{}
-	}
-
-	n.destroySandbox()
-}
-
-// to be called while holding network lock
-func (n *network) destroySandbox() {
-	logrus.Info("WINOVERLAY: Enter destroySandbox")
-
-	if n.sbox != nil {
-		for _, iface := range n.sbox.Info().Interfaces() {
-			if err := iface.Remove(); err != nil {
-				logrus.Debugf("Remove interface %s failed: %v", iface.SrcName(), err)
-			}
-		}
-
-		for _, s := range n.subnets {
-			if s.vxlanName != "" {
-				err := deleteInterface(s.vxlanName)
-				if err != nil {
-					logrus.Warnf("could not cleanup sandbox properly: %v", err)
-				}
-			}
-		}
-
-		n.sbox.Destroy()
-		n.sbox = nil
-	}
-}
-
-func populateVNITbl() {
-	logrus.Info("WINOVERLAY: Enter populateVNITbl")
-
-	filepath.Walk(filepath.Dir(osl.GenerateKey("walk")),
-		func(path string, info os.FileInfo, err error) error {
-			_, fname := filepath.Split(path)
-
-			if len(strings.Split(fname, "-")) <= 1 {
-				return nil
-			}
-
-			return nil
-		})
-}
-
-func networkOnceInit() {
-	logrus.Info("WINOVERLAY: Enter networkOnceInit")
-
-	populateVNITbl()
-
-	if os.Getenv("_OVERLAY_HOST_MODE") != "" {
-		hostMode = true
-		return
-	}
-
-	defer deleteInterface("testvxlan")
-}
-
-func (n *network) generateVxlanName(s *subnet) string {
-	logrus.Info("WINOVERLAY: Enter generateVxlanName")
-
-	id := n.id
-	if len(n.id) > 5 {
-		id = n.id[:5]
-	}
-
-	return "vx-" + fmt.Sprintf("%06x", n.vxlanID(s)) + "-" + id
-}
-
-func (n *network) generateBridgeName(s *subnet) string {
-	logrus.Info("WINOVERLAY: Enter generateBridgeName")
-
-	id := n.id
-	if len(n.id) > 5 {
-		id = n.id[:5]
-	}
-
-	return n.getBridgeNamePrefix(s) + "-" + id
-}
-
-func (n *network) getBridgeNamePrefix(s *subnet) string {
-	return "ov-" + fmt.Sprintf("%06x", n.vxlanID(s))
-}
-
-func isOverlap(nw *net.IPNet) bool {
-	logrus.Info("WINOVERLAY: Enter isOverlap")
-
-	var nameservers []string
-
-	if rc, err := resolvconf.Get(); err == nil {
-		nameservers = resolvconf.GetNameserversAsCIDR(rc.Content)
-	}
-
-	if err := netutils.CheckNameserverOverlaps(nameservers, nw); err != nil {
-		return true
-	}
-
-	return false
-}
-
-func (n *network) restoreSubnetSandbox(s *subnet, brName, vxlanName string) error {
-	logrus.Info("WINOVERLAY: Enter restoreSubnetSandbox")
-
-	sbox := n.sandbox()
-
-	// restore overlay osl sandbox
-	Ifaces := make(map[string][]osl.IfaceOption)
-	brIfaceOption := make([]osl.IfaceOption, 2)
-	if s.gwIP != nil {
-		brIfaceOption = append(brIfaceOption, sbox.InterfaceOptions().Address(s.gwIP))
-	}
-	brIfaceOption = append(brIfaceOption, sbox.InterfaceOptions().Bridge(true))
-	Ifaces[fmt.Sprintf("%s+%s", brName, "br")] = brIfaceOption
-
-	err := sbox.Restore(Ifaces, nil, nil, nil)
-	if err != nil {
-		return err
-	}
-
-	Ifaces = make(map[string][]osl.IfaceOption)
-	vxlanIfaceOption := make([]osl.IfaceOption, 1)
-	vxlanIfaceOption = append(vxlanIfaceOption, sbox.InterfaceOptions().Master(brName))
-	Ifaces[fmt.Sprintf("%s+%s", vxlanName, "vxlan")] = vxlanIfaceOption
-	err = sbox.Restore(Ifaces, nil, nil, nil)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (n *network) setupSubnetSandbox(s *subnet, brName, vxlanName string) error {
-
-	logrus.Info("WINOVERLAY: Enter setupSubnetSandbox")
-
-	if hostMode {
-		// Try to delete stale bridge interface if it exists
-		if err := deleteInterface(brName); err != nil {
-			deleteInterfaceBySubnet(n.getBridgeNamePrefix(s), s)
-		}
-
-		// Try to delete the vxlan interface by vni if already present
-		deleteVxlanByVNI("", n.vxlanID(s))
-
-		if isOverlap(s.subnetIP) {
-			return fmt.Errorf("overlay subnet %s has conflicts in the host while running in host mode", s.subnetIP.String())
-		}
-	}
-
-	if !hostMode {
-		// Try to find this subnet's vni is being used in some
-		// other namespace by looking at vniTbl that we just
-		// populated in the once init. If a hit is found then
-		// it must a stale namespace from previous
-		// life. Destroy it completely and reclaim resourced.
-		networkMu.Lock()
-		path, ok := vniTbl[n.vxlanID(s)]
-		networkMu.Unlock()
-
-		if ok {
-			deleteVxlanByVNI(path, n.vxlanID(s))
-			os.Remove(path)
-
-			networkMu.Lock()
-			delete(vniTbl, n.vxlanID(s))
-			networkMu.Unlock()
-		}
-	}
-
-	logrus.Info("WINOVERLAY: Leaving setupSubnetSandbox")
-
-	return nil
-}
-
-func (n *network) initSubnetSandbox(s *subnet, restore bool) error {
-	logrus.Info("WINOVERLAY: Enter initSubnetSandbox")
-
-	brName := n.generateBridgeName(s)
-	vxlanName := n.generateVxlanName(s)
-
-	if restore {
-		if err := n.restoreSubnetSandbox(s, brName, vxlanName); err != nil {
-			return err
-		}
-	} else {
-		if err := n.setupSubnetSandbox(s, brName, vxlanName); err != nil {
-			return err
-		}
-	}
-
-	n.Lock()
-	s.vxlanName = vxlanName
-	s.brName = brName
-	n.Unlock()
-
-	logrus.Info("WINOVERLAY: Leaving initSubnetSandbox")
-
-	return nil
-}
-
-func (n *network) cleanupStaleSandboxes() {
-
-	logrus.Info("WINOVERLAY: Enter cleanupStaleSandboxes")
-
-	filepath.Walk(filepath.Dir(osl.GenerateKey("walk")),
-		func(path string, info os.FileInfo, err error) error {
-			_, fname := filepath.Split(path)
-
-			pList := strings.Split(fname, "-")
-			if len(pList) <= 1 {
-				return nil
-			}
-
-			pattern := pList[1]
-			if strings.Contains(n.id, pattern) {
-				// Delete all vnis
-				deleteVxlanByVNI(path, 0)
-				os.Remove(path)
-
-				// Now that we have destroyed this
-				// sandbox, remove all references to
-				// it in vniTbl so that we don't
-				// inadvertently destroy the sandbox
-				// created in this life.
-				networkMu.Lock()
-				for vni, tblPath := range vniTbl {
-					if tblPath == path {
-						delete(vniTbl, vni)
-					}
-				}
-				networkMu.Unlock()
-			}
-
-			return nil
-		})
-}
-
-func (n *network) initSandbox(restore bool) error {
-
-	logrus.Info("WINOVERLAY: Enter initSandbox")
-
-	n.Lock()
-	n.initEpoch++
-	n.Unlock()
-
-	networkOnce.Do(networkOnceInit)
-
-	if !restore {
-		// If there are any stale sandboxes related to this network
-		// from previous daemon life clean it up here
-		n.cleanupStaleSandboxes()
-	}
-
-	// In the restore case network sandbox already exist; but we don't know
-	// what epoch number it was created with. It has to be retrieved by
-	// searching the net namespaces.
-	key := ""
-	if restore {
-		key = osl.GenerateKey("-" + n.id)
-	} else {
-		key = osl.GenerateKey(fmt.Sprintf("%d-", n.initEpoch) + n.id)
-	}
-
-	sbox, err := osl.NewSandbox(key, !hostMode, restore)
-	if err != nil {
-		return fmt.Errorf("could not get network sandbox (oper %t): %v", restore, err)
-	}
-
-	n.setSandbox(sbox)
-
-	if !restore {
-		n.driver.peerDbUpdateSandbox(n.id)
-	}
-
-	logrus.Info("WINOVERLAY: Leaving initSandbox")
-
-	return nil
-}
-
 func (d *driver) addNetwork(n *network) {
-
-	logrus.Info("WINOVERLAY: Enter addNetwork")
-
 	d.Lock()
 	d.networks[n.id] = n
 	d.Unlock()
 }
 
 func (d *driver) deleteNetwork(nid string) {
-
-	logrus.Info("WINOVERLAY: Enter deleteNetwork")
-
 	d.Lock()
 	delete(d.networks, nid)
 	d.Unlock()
 }
 
 func (d *driver) network(nid string) *network {
-
-	logrus.Info("WINOVERLAY: Enter network")
-
 	d.Lock()
 	networks := d.networks
 	d.Unlock()
@@ -644,7 +218,6 @@ func (d *driver) network(nid string) *network {
 		if n != nil {
 			n.driver = d
 			n.endpoints = endpointTable{}
-			n.once = &sync.Once{}
 			networks[nid] = n
 		}
 	}
@@ -653,9 +226,6 @@ func (d *driver) network(nid string) *network {
 }
 
 func (d *driver) getNetworkFromStore(nid string) *network {
-
-	logrus.Info("WINOVERLAY: Enter getNetworkFromStore")
-
 	if d.store == nil {
 		return nil
 	}
@@ -666,72 +236,13 @@ func (d *driver) getNetworkFromStore(nid string) *network {
 	}
 
 	// As the network is being discovered from the global store, HNS may not be aware of it yet
-	// Todo - this is code duplication from CreateNetwork, move to helper function
-
-	logrus.Infof("WINOVERLAY: Notify HNS of existing network with name: %s", n.name)
-
-	subnets := []hcsshim.Subnet{}
-
-	for _, s := range n.subnets {
-		subnet := hcsshim.Subnet{
-			AddressPrefix: s.subnetIP.String(),
-		}
-
-		if s.gwIP != nil {
-			subnet.GatewayAddress = s.gwIP.String()
-		}
-
-		vsidPolicy, err := json.Marshal(hcsshim.VsidPolicy{
-			Type: "VSID",
-			VSID: uint(s.vni),
-		})
-
-		if err != nil {
-			// todo should log error
-			return nil
-		}
-
-		subnet.Policies = append(subnet.Policies, vsidPolicy)
-		subnets = append(subnets, subnet)
-	}
-
-	network := &hcsshim.HNSNetwork{
-		Id:                 n.hnsId,
-		Name:               n.name,
-		Type:               d.Type(),
-		Subnets:            subnets,
-		NetworkAdapterName: n.interfaceName,
-	}
-
-	configurationb, err := json.Marshal(network)
+	err := d.findHnsNetwork(n)
 	if err != nil {
-		// todo should log error
-		return nil
-	}
-
-	configuration := string(configurationb)
-	logrus.Infof("HNSNetwork Request =%v", configuration)
-
-	_, err = hcsshim.HNSNetworkRequest("POST", "", configuration)
-	if err != nil {
-		// todo should log error
+		logrus.Errorf("Failed to find hns network: %v", err)
 		return nil
 	}
 
 	return n
-}
-
-func (n *network) sandbox() osl.Sandbox {
-	n.Lock()
-	defer n.Unlock()
-
-	return n.sbox
-}
-
-func (n *network) setSandbox(sbox osl.Sandbox) {
-	n.Lock()
-	n.sbox = sbox
-	n.Unlock()
 }
 
 func (n *network) vxlanID(s *subnet) uint32 {
@@ -776,8 +287,8 @@ func (n *network) Value() []byte {
 
 	m["secure"] = n.secure
 	m["subnets"] = netJSON
-	m["providerAddress"] = n.providerAddress
 	m["interfaceName"] = n.interfaceName
+	m["providerAddress"] = n.providerAddress
 	m["hnsId"] = n.hnsId
 	m["name"] = n.name
 	b, err = json.Marshal(m)
@@ -863,7 +374,6 @@ func (n *network) SetValue(value []byte) error {
 				subnetIP: subnetIP,
 				gwIP:     gwIP,
 				vni:      vni,
-				once:     &sync.Once{},
 			}
 			n.subnets = append(n.subnets, s)
 		} else {
@@ -881,23 +391,14 @@ func (n *network) DataScope() string {
 }
 
 func (n *network) writeToStore() error {
-
-	logrus.Info("WINOVERLAY: Enter writeToStore")
-
 	if n.driver.store == nil {
-		logrus.Info("WINOVERLAY: writeToStore returning nil due to no driver.store")
 		return nil
 	}
-
-	logrus.Info("WINOVERLAY: writeToStore putting atomic object")
 
 	return n.driver.store.PutObjectAtomic(n)
 }
 
 func (n *network) releaseVxlanID() ([]uint32, error) {
-
-	logrus.Info("WINOVERLAY: Enter releaseVxlanID")
-
 	if len(n.subnets) == 0 {
 		return nil, nil
 	}
@@ -928,9 +429,6 @@ func (n *network) releaseVxlanID() ([]uint32, error) {
 }
 
 func (n *network) obtainVxlanID(s *subnet) error {
-
-	logrus.Info("WINOVERLAY: Enter obtainVxlanID")
-
 	//return if the subnet already has a vxlan id assigned
 	if s.vni != 0 {
 		return nil
@@ -951,7 +449,6 @@ func (n *network) obtainVxlanID(s *subnet) error {
 				return fmt.Errorf("failed to allocate vxlan id: %v", err)
 			}
 
-			logrus.Infof("WINOVERLAY: obtainVxlanID is assigning id %v to subnet %v", vxlanID, s.subnetIP.String())
 			n.setVxlanID(s, uint32(vxlanID))
 			if err := n.writeToStore(); err != nil {
 				n.driver.vxlanIdm.Release(uint64(n.vxlanID(s)))
@@ -981,9 +478,6 @@ func (n *network) contains(ip net.IP) bool {
 
 // getSubnetforIP returns the subnet to which the given IP belongs
 func (n *network) getSubnetforIP(ip *net.IPNet) *subnet {
-
-	logrus.Info("WINOVERLAY: Enter getSubnetForIP")
-
 	for _, s := range n.subnets {
 		// first check if the mask lengths are the same
 		i, _ := s.subnetIP.Mask.Size()
@@ -1000,9 +494,6 @@ func (n *network) getSubnetforIP(ip *net.IPNet) *subnet {
 
 // getMatchingSubnet return the network's subnet that matches the input
 func (n *network) getMatchingSubnet(ip *net.IPNet) *subnet {
-
-	logrus.Info("WINOVERLAY: Enter getMatchingSubnet")
-
 	if ip == nil {
 		return nil
 	}

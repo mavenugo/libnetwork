@@ -20,17 +20,26 @@ type endpoint struct {
 	id        string
 	nid       string
 	profileId string
-	ifName    string
+	remote    bool
 	mac       net.HardwareAddr
 	addr      *net.IPNet
 	dbExists  bool
 	dbIndex   uint64
 }
 
+func validateID(nid, eid string) error {
+	if nid == "" {
+		return fmt.Errorf("invalid network id")
+	}
+
+	if eid == "" {
+		return fmt.Errorf("invalid endpoint id")
+	}
+
+	return nil
+}
+
 func (n *network) endpoint(eid string) *endpoint {
-
-	logrus.Info("WINOVERLAY: Enter endpoint")
-
 	n.Lock()
 	defer n.Unlock()
 
@@ -38,29 +47,48 @@ func (n *network) endpoint(eid string) *endpoint {
 }
 
 func (n *network) addEndpoint(ep *endpoint) {
-
-	logrus.Info("WINOVERLAY: Enter addEndpoint")
-
 	n.Lock()
 	n.endpoints[ep.id] = ep
 	n.Unlock()
 }
 
 func (n *network) deleteEndpoint(eid string) {
-
-	logrus.Info("WINOVERLAY: Enter deleteEndpoint")
-
 	n.Lock()
 	delete(n.endpoints, eid)
 	n.Unlock()
 }
 
+func (n *network) removeEndpointWithAddress(addr *net.IPNet) {
+	var networkEndpoint *endpoint
+	n.Lock()
+	for _, ep := range n.endpoints {
+		if ep.addr.IP.Equal(addr.IP) {
+			networkEndpoint = ep
+			break
+		}
+	}
+	if networkEndpoint != nil {
+		delete(n.endpoints, networkEndpoint.id)
+	}
+	n.Unlock()
+
+	if networkEndpoint != nil {
+		logrus.Debugf("Removing stale endpoint from HNS")
+		_, err := hcsshim.HNSEndpointRequest("DELETE", networkEndpoint.profileId, "")
+
+		if err != nil {
+			logrus.Debugf("Failed to delete stale overlay endpoint (%s) from hns", networkEndpoint.id[0:7])
+		}
+
+		if err := n.driver.deleteEndpointFromStore(networkEndpoint); err != nil {
+			logrus.Debugf("Failed to delete stale overlay endpoint (%s) from store", networkEndpoint.id[0:7])
+		}
+	}
+}
+
 func (d *driver) CreateEndpoint(nid, eid string, ifInfo driverapi.InterfaceInfo,
 	epOptions map[string]interface{}) error {
 	var err error
-
-	logrus.Info("WINOVERLAY: Enter CreateEndpoint")
-
 	if err = validateID(nid, eid); err != nil {
 		return err
 	}
@@ -77,8 +105,6 @@ func (d *driver) CreateEndpoint(nid, eid string, ifInfo driverapi.InterfaceInfo,
 		return fmt.Errorf("network id %q not found", nid)
 	}
 
-	logrus.Info("WINOVERLAY: CreateEndpoint creating endpoint object")
-
 	ep := &endpoint{
 		id:   eid,
 		nid:  n.id,
@@ -86,38 +112,20 @@ func (d *driver) CreateEndpoint(nid, eid string, ifInfo driverapi.InterfaceInfo,
 		mac:  ifInfo.MacAddress(),
 	}
 
-	logrus.Infof("WINOVERLAY: CreateEndpoint endpoint address is %s", ep.addr)
-
 	if ep.addr == nil {
 		return fmt.Errorf("create endpoint was not passed interface IP address")
 	}
-
-	logrus.Info("WINOVERLAY: CreateEndpoint Locating subnet for endpoint")
 
 	if s := n.getSubnetforIP(ep.addr); s == nil {
 		return fmt.Errorf("no matching subnet for IP %q in network %q\n", ep.addr, nid)
 	}
 
-	logrus.Info("WINOVERLAY: CreateEndpoint checking on MAC")
-
-	// Not doing this for now as current plan is to let HNS assign the MAC
-	//if ep.mac == nil {
-
-	//logrus.Info("WINOVERLAY: CreateEndpoint generating a MAC")
-
-	//ep.mac = netutils.GenerateMACFromIP(ep.addr.IP)
-	//if err := ifInfo.SetMacAddress(ep.mac); err != nil {
-	//	return err
-	//}
-	//}
-
 	// Todo: Add port bindings and qos policies here
 
-	logrus.Info("WINOVERLAY: CreateEndpoint notifying HNS of the local endpoint")
-
 	hnsEndpoint := &hcsshim.HNSEndpoint{
-		VirtualNetwork: n.hnsId,
-		IPAddress:      ep.addr.IP,
+		VirtualNetwork:    n.hnsId,
+		IPAddress:         ep.addr.IP,
+		EnableInternalDNS: true,
 	}
 
 	if ep.mac != nil {
@@ -140,9 +148,6 @@ func (d *driver) CreateEndpoint(nid, eid string, ifInfo driverapi.InterfaceInfo,
 		return err
 	}
 
-	configuration := string(configurationb)
-	logrus.Infof("HNSEndpoint Request =%v", configuration)
-
 	hnsresponse, err := hcsshim.HNSEndpointRequest("POST", "", string(configurationb))
 	if err != nil {
 		return err
@@ -161,25 +166,15 @@ func (d *driver) CreateEndpoint(nid, eid string, ifInfo driverapi.InterfaceInfo,
 		}
 	}
 
-	logrus.Info("WINOVERLAY: CreateEndpoint adding the endpoint to the network")
-
 	n.addEndpoint(ep)
-
-	logrus.Info("WINOVERLAY: CreateEndpoint writing endpoint to local store")
-
 	if err := d.writeEndpointToStore(ep); err != nil {
 		return fmt.Errorf("failed to update overlay endpoint %s to local store: %v", ep.id[0:7], err)
 	}
-
-	logrus.Info("WINOVERLAY: Leaving CreateEndpoint")
 
 	return nil
 }
 
 func (d *driver) DeleteEndpoint(nid, eid string) error {
-
-	logrus.Info("WINOVERLAY: Enter DeleteEndpoint")
-
 	if err := validateID(nid, eid); err != nil {
 		return err
 	}
@@ -199,8 +194,6 @@ func (d *driver) DeleteEndpoint(nid, eid string) error {
 	if err := d.deleteEndpointFromStore(ep); err != nil {
 		logrus.Warnf("Failed to delete overlay endpoint %s from local store: %v", ep.id[0:7], err)
 	}
-
-	logrus.Infof("HNSEndpoint Request DELETE for endpoint id %s", ep.profileId)
 
 	_, err := hcsshim.HNSEndpointRequest("DELETE", ep.profileId, "")
 	if err != nil {
@@ -227,13 +220,11 @@ func (d *driver) EndpointOperInfo(nid, eid string) (map[string]interface{}, erro
 
 	data := make(map[string]interface{}, 1)
 	data["hnsid"] = ep.profileId
+	data["AllowUnqualifiedDNSQuery"] = true
 	return data, nil
 }
 
 func (d *driver) deleteEndpointFromStore(e *endpoint) error {
-
-	logrus.Info("WINOVERLAY: Enter deleteEndpointFromStore")
-
 	if d.localStore == nil {
 		return fmt.Errorf("overlay local store not initialized, ep not deleted")
 	}
@@ -246,9 +237,6 @@ func (d *driver) deleteEndpointFromStore(e *endpoint) error {
 }
 
 func (d *driver) writeEndpointToStore(e *endpoint) error {
-
-	logrus.Info("WINOVERLAY: Enter writeEndpointToStore")
-
 	if d.localStore == nil {
 		return fmt.Errorf("overlay local store not initialized, ep not added")
 	}
@@ -311,19 +299,15 @@ func (ep *endpoint) SetValue(value []byte) error {
 }
 
 func (ep *endpoint) MarshalJSON() ([]byte, error) {
-
-	logrus.Info("WINOVERLAY: Enter MarshalJSON")
-
 	epMap := make(map[string]interface{})
 
 	epMap["id"] = ep.id
 	epMap["nid"] = ep.nid
+	epMap["remote"] = ep.remote
 	if ep.profileId != "" {
 		epMap["profileId"] = ep.profileId
 	}
-	if ep.ifName != "" {
-		epMap["ifName"] = ep.ifName
-	}
+
 	if ep.addr != nil {
 		epMap["addr"] = ep.addr.String()
 	}
@@ -340,12 +324,11 @@ func (ep *endpoint) UnmarshalJSON(value []byte) error {
 		epMap map[string]interface{}
 	)
 
-	logrus.Info("WINOVERLAY: Enter UnmarshalJSON")
-
 	json.Unmarshal(value, &epMap)
 
 	ep.id = epMap["id"].(string)
 	ep.nid = epMap["nid"].(string)
+	ep.remote = epMap["remote"].(bool)
 	if v, ok := epMap["profileId"]; ok {
 		ep.profileId = v.(string)
 	}
@@ -359,9 +342,5 @@ func (ep *endpoint) UnmarshalJSON(value []byte) error {
 			return types.InternalErrorf("failed to decode endpoint interface ipv4 address after json unmarshal: %v", err)
 		}
 	}
-	if v, ok := epMap["ifName"]; ok {
-		ep.ifName = v.(string)
-	}
-
 	return nil
 }
