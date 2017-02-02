@@ -67,7 +67,7 @@ func (c *cache) kmap(kvObject KVObject) (kvMap, error) {
 		// case we need to modify it and update the DB.
 		dstO.SetIndex(kvPair.LastIndex)
 
-		kmap[Key(dstO.Key()...)] = dstO
+		kmap[kvPair.Key] = dstO
 	}
 
 out:

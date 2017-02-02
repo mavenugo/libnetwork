@@ -29,7 +29,7 @@ func (ec *endpointCnt) KeyPrefix() []string {
 	ec.Lock()
 	defer ec.Unlock()
 
-	return []string{epCntKeyPrefix, ec.n.id}
+	return []string{epCntKeyPrefix}
 }
 
 func (ec *endpointCnt) Value() []byte {
