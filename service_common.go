@@ -81,11 +81,12 @@ func (c *controller) cleanupServiceBindings(cleanupNID string) {
 }
 
 func (c *controller) addServiceBinding(name, sid, nid, eid string, vip net.IP, ingressPorts []*PortConfig, aliases []string, ip net.IP) error {
-	n, err := c.NetworkByID(nid)
+	n, err := c.NetworkRefByID(nid)
 	if err != nil {
 		return err
 	}
 
+	logrus.Errorf("NetworkRef for %s with a ref %p", nid, n.(*network).driverTables)
 	skey := serviceKey{
 		id:    sid,
 		ports: portConfigs(ingressPorts).String(),
@@ -154,11 +155,12 @@ func (c *controller) addServiceBinding(name, sid, nid, eid string, vip net.IP, i
 func (c *controller) rmServiceBinding(name, sid, nid, eid string, vip net.IP, ingressPorts []*PortConfig, aliases []string, ip net.IP) error {
 	var rmService bool
 
-	n, err := c.NetworkByID(nid)
+	n, err := c.NetworkRefByID(nid)
 	if err != nil {
 		return err
 	}
 
+	logrus.Errorf("NetworkRef for %s with a ref %p", nid, n.(*network).driverTables)
 	skey := serviceKey{
 		id:    sid,
 		ports: portConfigs(ingressPorts).String(),

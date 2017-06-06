@@ -20,6 +20,14 @@ func newCache(ds *datastore) *cache {
 	return &cache{kmm: make(map[string]kvMap), ds: ds}
 }
 
+func (c *cache) getKmap(keyPrefix string) (kvMap, error) {
+	kmap, ok := c.kmm[keyPrefix]
+	if !ok {
+		return nil, ErrKeyNotFound
+	}
+	return kmap, nil
+}
+
 func (c *cache) kmap(kvObject KVObject) (kvMap, error) {
 	var err error
 
@@ -158,6 +166,23 @@ func (c *cache) get(key string, kvObject KVObject) error {
 	}
 
 	return ctor.CopyTo(kvObject)
+}
+
+func (c *cache) getRef(key string, keyPrefix string) (KVObject, error) {
+	kmap, err := c.getKmap(keyPrefix)
+	if err != nil {
+		return nil, err
+	}
+
+	c.Lock()
+	defer c.Unlock()
+
+	o, ok := kmap[key]
+	if !ok {
+		return nil, ErrKeyNotFound
+	}
+
+	return o, nil
 }
 
 func (c *cache) list(kvObject KVObject) ([]KVObject, error) {

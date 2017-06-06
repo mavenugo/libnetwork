@@ -1013,6 +1013,19 @@ func (c *controller) NetworkByID(id string) (Network, error) {
 	return n, nil
 }
 
+func (c *controller) NetworkRefByID(id string) (Network, error) {
+	if id == "" {
+		return nil, ErrInvalidID(id)
+	}
+
+	n, err := c.getNetworkRefFromStore(id)
+	if err != nil {
+		return nil, ErrNoSuchNetwork(id)
+	}
+
+	return n, nil
+}
+
 // NewSandbox creates a new sandbox for the passed container id
 func (c *controller) NewSandbox(containerID string, options ...SandboxOption) (sBox Sandbox, err error) {
 	if containerID == "" {

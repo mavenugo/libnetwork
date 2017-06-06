@@ -18,6 +18,8 @@ import (
 type DataStore interface {
 	// GetObject gets data from datastore and unmarshals to the specified object
 	GetObject(key string, o KVObject) error
+	// GetObjectRef gets a reference of the object stored in cache
+	GetObjectRef(key string, keyPrefix string) (KVObject, error)
 	// PutObject adds a new Record based on an object into the datastore
 	PutObject(kvObject KVObject) error
 	// PutObjectAtomic provides an atomic add and update operation for a Record
@@ -52,8 +54,9 @@ type DataStore interface {
 
 // ErrKeyModified is raised for an atomic update when the update is working on a stale state
 var (
-	ErrKeyModified = store.ErrKeyModified
-	ErrKeyNotFound = store.ErrKeyNotFound
+	ErrKeyModified      = store.ErrKeyModified
+	ErrKeyNotFound      = store.ErrKeyNotFound
+	ErrCallNotSupported = store.ErrCallNotSupported
 )
 
 type datastore struct {
@@ -494,6 +497,14 @@ func (ds *datastore) GetObject(key string, o KVObject) error {
 	// case we need to modify it and update the DB.
 	o.SetIndex(kvPair.LastIndex)
 	return nil
+}
+
+// GetObjectRef gets a reference of the object stored in cache
+func (ds *datastore) GetObjectRef(key string, keyPrefix string) (KVObject, error) {
+	if ds.cache == nil {
+		return nil, ErrCallNotSupported
+	}
+	return ds.cache.getRef(key, keyPrefix)
 }
 
 func (ds *datastore) ensureParent(parent string) error {

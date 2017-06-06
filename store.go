@@ -107,6 +107,23 @@ func (c *controller) getNetworkFromStore(nid string) (*network, error) {
 	return nil, fmt.Errorf("network %s not found", nid)
 }
 
+func (c *controller) getNetworkRefFromStore(nid string) (*network, error) {
+	for _, store := range c.getStores() {
+		nObj := &network{id: nid, ctrlr: c}
+		nRef, err := store.GetObjectRef(datastore.Key(nObj.Key()...), datastore.Key(nObj.KeyPrefix()...))
+		// Continue searching in the next store if the key is not found in this store
+		if err != nil {
+			if err != datastore.ErrKeyNotFound || err != datastore.ErrCallNotSupported {
+				logrus.Debugf("could not find network %s: %v", nid, err)
+			}
+			continue
+		}
+
+		return nRef.(*network), nil
+	}
+
+	return nil, fmt.Errorf("network %s not found", nid)
+}
 func (c *controller) getNetworksForScope(scope string) ([]*network, error) {
 	var nl []*network
 
