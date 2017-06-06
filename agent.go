@@ -593,6 +593,8 @@ func (ep *endpoint) addServiceInfoToCluster() error {
 		return nil
 	}
 
+	logrus.Errorf("addServiceInfoToCluster START for %s %s", ep.svcName, ep.ID())
+
 	c := n.getController()
 	agent := c.getAgent()
 
@@ -602,8 +604,7 @@ func (ep *endpoint) addServiceInfoToCluster() error {
 		if n.ingress {
 			ingressPorts = ep.ingressPorts
 		}
-
-		if err := c.addServiceBinding(ep.svcName, ep.svcID, n.ID(), ep.ID(), ep.virtualIP, ingressPorts, ep.svcAliases, ep.Iface().Address().IP); err != nil {
+		if err := c.addServiceBinding(ep.svcName, ep.svcID, n.ID(), ep.ID(), ep.Name(), ep.virtualIP, ingressPorts, ep.svcAliases, ep.myAliases, ep.Iface().Address().IP, "addServiceInfoToCluster"); err != nil {
 			return err
 		}
 	}
@@ -634,6 +635,8 @@ func (ep *endpoint) addServiceInfoToCluster() error {
 		}
 	}
 
+	logrus.Errorf("addServiceInfoToCluster END for %s %s", ep.svcName, ep.ID())
+
 	return nil
 }
 
@@ -647,6 +650,8 @@ func (ep *endpoint) deleteServiceInfoFromCluster() error {
 		return nil
 	}
 
+	logrus.Errorf("deleteServiceInfoFromCluster START for %s %s", ep.svcName, ep.ID())
+
 	c := n.getController()
 	agent := c.getAgent()
 
@@ -655,10 +660,11 @@ func (ep *endpoint) deleteServiceInfoFromCluster() error {
 		if n.ingress {
 			ingressPorts = ep.ingressPorts
 		}
-
-		if err := c.rmServiceBinding(ep.svcName, ep.svcID, n.ID(), ep.ID(), ep.virtualIP, ingressPorts, ep.svcAliases, ep.Iface().Address().IP); err != nil {
+		if err := c.rmServiceBinding(ep.svcName, ep.svcID, n.ID(), ep.ID(), ep.Name(), ep.virtualIP, ingressPorts, ep.svcAliases, ep.myAliases, ep.Iface().Address().IP, "deleteServiceInfoFromCluster"); err != nil {
 			return err
 		}
+	} else {
+		logrus.Errorf("deleteServiceInfoFromCluster no DELETE because %t %t", ep.svcID != "", ep.Iface().Address() != nil)
 	}
 
 	if agent != nil {
@@ -666,6 +672,8 @@ func (ep *endpoint) deleteServiceInfoFromCluster() error {
 			return err
 		}
 	}
+
+	logrus.Errorf("deleteServiceInfoFromCluster END for %s %s", ep.svcName, ep.ID())
 
 	return nil
 }
@@ -816,56 +824,41 @@ func (c *controller) handleEpTableEvent(ev events.Event) {
 		logrus.Errorf("Unexpected update service table event = %#v", event)
 	}
 
-	nw, err := c.NetworkByID(nid)
-	if err != nil {
-		logrus.Errorf("Could not find network %s while handling service table event: %v", nid, err)
-		return
-	}
-	n := nw.(*network)
-
-	err = proto.Unmarshal(value, &epRec)
+	err := proto.Unmarshal(value, &epRec)
 	if err != nil {
 		logrus.Errorf("Failed to unmarshal service table value: %v", err)
 		return
 	}
 
-	name := epRec.Name
+	containerName := epRec.Name
 	svcName := epRec.ServiceName
 	svcID := epRec.ServiceID
 	vip := net.ParseIP(epRec.VirtualIP)
 	ip := net.ParseIP(epRec.EndpointIP)
 	ingressPorts := epRec.IngressPorts
-	aliases := epRec.Aliases
-	taskaliases := epRec.TaskAliases
+	serviceAliases := epRec.Aliases
+	taskAliases := epRec.TaskAliases
 
-	if name == "" || ip == nil {
+	if containerName == "" || ip == nil {
 		logrus.Errorf("Invalid endpoint name/ip received while handling service table event %s", value)
 		return
 	}
 
 	if isAdd {
+		logrus.Warnf("handleEpTableEvent ADD %s R:%v", isAdd, eid, epRec)
 		if svcID != "" {
-			if err := c.addServiceBinding(svcName, svcID, nid, eid, vip, ingressPorts, aliases, ip); err != nil {
+			if err := c.addServiceBinding(svcName, svcID, nid, eid, containerName, vip, ingressPorts, serviceAliases, taskAliases, ip, "handleEpTableEvent"); err != nil {
 				logrus.Errorf("Failed adding service binding for value %s: %v", value, err)
 				return
 			}
-		}
-
-		n.addSvcRecords(name, ip, nil, true)
-		for _, alias := range taskaliases {
-			n.addSvcRecords(alias, ip, nil, true)
 		}
 	} else {
+		logrus.Warnf("handleEpTableEvent DEL %s R:%v", isAdd, eid, epRec)
 		if svcID != "" {
-			if err := c.rmServiceBinding(svcName, svcID, nid, eid, vip, ingressPorts, aliases, ip); err != nil {
+			if err := c.rmServiceBinding(svcName, svcID, nid, eid, containerName, vip, ingressPorts, serviceAliases, taskAliases, ip, "handleEpTableEvent"); err != nil {
 				logrus.Errorf("Failed adding service binding for value %s: %v", value, err)
 				return
 			}
-		}
-
-		n.deleteSvcRecords(name, ip, nil, true)
-		for _, alias := range taskaliases {
-			n.deleteSvcRecords(alias, ip, nil, true)
 		}
 	}
 }

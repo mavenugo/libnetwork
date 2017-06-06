@@ -342,6 +342,11 @@ func (nDB *NetworkDB) reapTableEntries() {
 			entry.reapTime -= reapPeriod
 			return false
 		}
+		params := strings.Split(path[1:], "/")
+		tname := params[0]
+		nid := params[1]
+		key := params[2]
+		logrus.Errorf("NDB reapTableEntries %s reapTime expired", fmt.Sprintf("/%s/%s/%s", tname, nid, key))
 		paths = append(paths, path)
 		return false
 	})
@@ -357,6 +362,7 @@ func (nDB *NetworkDB) reapTableEntries() {
 		if _, ok := nDB.indexes[byTable].Delete(fmt.Sprintf("/%s/%s/%s", tname, nid, key)); !ok {
 			logrus.Errorf("Could not delete entry in table %s with network id %s and key %s as it does not exist", tname, nid, key)
 		}
+		logrus.Errorf("NDB delete %s", fmt.Sprintf("/%s/%s/%s", tname, nid, key))
 
 		if _, ok := nDB.indexes[byNetwork].Delete(fmt.Sprintf("/%s/%s/%s", nid, tname, key)); !ok {
 			logrus.Errorf("Could not delete entry in network %s with table name %s and key %s as it does not exist", nid, tname, key)

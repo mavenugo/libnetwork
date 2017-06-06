@@ -185,6 +185,7 @@ func New(cfgOptions ...config.Option) (NetworkController, error) {
 		serviceBindings: make(map[serviceKey]*service),
 		agentInitDone:   make(chan struct{}),
 		networkLocker:   locker.New(),
+		// service:         make(map[string]*sync.Mutex),
 	}
 
 	if err := c.initStores(); err != nil {

@@ -222,6 +222,14 @@ func (nDB *NetworkDB) handleTableEvent(tEvent *TableEvent) bool {
 		}
 	}
 
+	if tEvent.TableName == "endpoint_table" {
+		if e != nil {
+			logrus.Errorf("DB CB %s %s local:%d evetnlt:%d elemlt:%d", TableEvent_Type_name[int32(tEvent.Type)], tEvent.Key, nDB.tableClock.Time(), tEvent.LTime, e.ltime)
+		} else {
+			logrus.Errorf("DB CB %s %s local:%d evetnlt:%d", TableEvent_Type_name[int32(tEvent.Type)], tEvent.Key, nDB.tableClock.Time(), tEvent.LTime)
+		}
+	}
+
 	e = &entry{
 		ltime:    tEvent.LTime,
 		node:     tEvent.NodeName,
@@ -275,8 +283,10 @@ func (nDB *NetworkDB) handleTableMessage(buf []byte, isBulkSync bool) {
 
 	// Ignore messages that this node generated.
 	if tEvent.NodeName == nDB.config.NodeName {
+		// logrus.Errorf("handleTableMessage %s node check %s == %s SUPPRESSED", TableEvent_Type_name[int32(tEvent.Type)], tEvent.NodeName, nDB.config.NodeName)
 		return
 	}
+	// logrus.Errorf("handleTableMessage %s node check %s == %s", TableEvent_Type_name[int32(tEvent.Type)], tEvent.NodeName, nDB.config.NodeName)
 
 	// Do not rebroadcast a bulk sync
 	if rebroadcast := nDB.handleTableEvent(&tEvent); rebroadcast && !isBulkSync {

@@ -668,6 +668,7 @@ func (sb *sandbox) SetKey(basePath string) error {
 }
 
 func (sb *sandbox) EnableService() error {
+	logrus.Errorf("EnableService %s START", sb.containerID)
 	for _, ep := range sb.getConnectedEndpoints() {
 		if ep.enableService(true) {
 			if err := ep.addServiceInfoToCluster(); err != nil {
@@ -676,18 +677,21 @@ func (sb *sandbox) EnableService() error {
 			}
 		}
 	}
+	logrus.Errorf("EnableService %s DONE", sb.containerID)
 	return nil
 }
 
 func (sb *sandbox) DisableService() error {
+	logrus.Errorf("DisableService %s START", sb.containerID)
 	for _, ep := range sb.getConnectedEndpoints() {
 		if ep.enableService(false) {
-			if err := ep.deleteServiceInfoFromCluster(); err != nil {
-				ep.enableService(true)
-				return fmt.Errorf("could not delete state for endpoint %s from cluster: %v", ep.Name(), err)
-			}
+			// if err := ep.deleteServiceInfoFromCluster(sb); err != nil {
+			// 	ep.enableService(true)
+			// 	return fmt.Errorf("could not delete state for endpoint %s from cluster: %v", ep.Name(), err)
+			// }
 		}
 	}
+	logrus.Errorf("DisableService %s DONE", sb.containerID)
 	return nil
 }
 

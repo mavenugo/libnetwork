@@ -276,6 +276,10 @@ func (nDB *NetworkDB) CreateEntry(tname, nid, key string, value []byte) error {
 		value: value,
 	}
 
+	if tname == "endpoint_table" {
+		logrus.Warnf("NDB CREATE lt:%d /%s/%s/%s", entry.ltime, tname, nid, key)
+	}
+
 	if err := nDB.sendTableEvent(TableEventTypeCreate, nid, tname, key, entry); err != nil {
 		return fmt.Errorf("cannot send create event for table %s, %v", tname, err)
 	}
@@ -285,7 +289,7 @@ func (nDB *NetworkDB) CreateEntry(tname, nid, key string, value []byte) error {
 	nDB.indexes[byNetwork].Insert(fmt.Sprintf("/%s/%s/%s", nid, tname, key), entry)
 	nDB.Unlock()
 
-	nDB.broadcaster.Write(makeEvent(opCreate, tname, nid, key, value))
+	// nDB.broadcaster.Write(makeEvent(opCreate, tname, nid, key, value))
 	return nil
 }
 
@@ -304,6 +308,10 @@ func (nDB *NetworkDB) UpdateEntry(tname, nid, key string, value []byte) error {
 		value: value,
 	}
 
+	if tname == "endpoint_table" {
+		logrus.Warnf("NDB UPDATE lt:%d /%s/%s/%s", entry.ltime, tname, nid, key)
+	}
+
 	if err := nDB.sendTableEvent(TableEventTypeUpdate, nid, tname, key, entry); err != nil {
 		return fmt.Errorf("cannot send table update event: %v", err)
 	}
@@ -313,7 +321,7 @@ func (nDB *NetworkDB) UpdateEntry(tname, nid, key string, value []byte) error {
 	nDB.indexes[byNetwork].Insert(fmt.Sprintf("/%s/%s/%s", nid, tname, key), entry)
 	nDB.Unlock()
 
-	nDB.broadcaster.Write(makeEvent(opUpdate, tname, nid, key, value))
+	// nDB.broadcaster.Write(makeEvent(opUpdate, tname, nid, key, value))
 	return nil
 }
 
@@ -350,6 +358,10 @@ func (nDB *NetworkDB) DeleteEntry(tname, nid, key string) error {
 		reapTime: reapInterval,
 	}
 
+	if tname == "endpoint_table" {
+		logrus.Warnf("NDB DELETE lt:%d /%s/%s/%s", entry.ltime, tname, nid, key)
+	}
+
 	if err := nDB.sendTableEvent(TableEventTypeDelete, nid, tname, key, entry); err != nil {
 		return fmt.Errorf("cannot send table delete event: %v", err)
 	}
@@ -359,7 +371,7 @@ func (nDB *NetworkDB) DeleteEntry(tname, nid, key string) error {
 	nDB.indexes[byNetwork].Insert(fmt.Sprintf("/%s/%s/%s", nid, tname, key), entry)
 	nDB.Unlock()
 
-	nDB.broadcaster.Write(makeEvent(opDelete, tname, nid, key, value))
+	// nDB.broadcaster.Write(makeEvent(opDelete, tname, nid, key, value))
 	return nil
 }
 
@@ -543,6 +555,9 @@ func (nDB *NetworkDB) LeaveNetwork(nid string) error {
 
 		if _, ok := nDB.indexes[byTable].Delete(fmt.Sprintf("/%s/%s/%s", tname, nid, key)); !ok {
 			logrus.Errorf("Could not delete entry in table %s with network id %s and key %s as it does not exist", tname, nid, key)
+		}
+		if tname == "endpoint_table" {
+			logrus.Errorf("LeaveNetwork cleaning /%s/%s/%s", tname, nid, key)
 		}
 
 		if _, ok := nDB.indexes[byNetwork].Delete(fmt.Sprintf("/%s/%s/%s", nid, tname, key)); !ok {
