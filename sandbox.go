@@ -674,7 +674,7 @@ func (sb *sandbox) EnableService() error {
 	logrus.Debugf("EnableService %s START", sb.containerID)
 	for _, ep := range sb.getConnectedEndpoints() {
 		if ep.enableService(true) {
-			if err := ep.addServiceInfoToCluster(sb); err != nil {
+			if err := ep.addServiceInfoToCluster(); err != nil {
 				ep.enableService(false)
 				return fmt.Errorf("could not update state for endpoint %s into cluster: %v", ep.Name(), err)
 			}

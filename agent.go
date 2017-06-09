@@ -583,7 +583,7 @@ func (ep *endpoint) deleteDriverInfoFromCluster() error {
 	return nil
 }
 
-func (ep *endpoint) addServiceInfoToCluster(sb *sandbox) error {
+func (ep *endpoint) addServiceInfoToCluster() error {
 	if ep.isAnonymous() && len(ep.myAliases) == 0 || ep.Iface().Address() == nil {
 		return nil
 	}
@@ -593,6 +593,22 @@ func (ep *endpoint) addServiceInfoToCluster(sb *sandbox) error {
 		return nil
 	}
 
+	ep.Lock()
+	sbid := ep.sandboxID
+	ep.Unlock()
+
+	if sbid == "" {
+		logrus.Warnf("Sandbox not set on %s. Ignoring addServiceInfoToCluster", ep.ID())
+		return nil
+	}
+
+	sbI, _ := n.getController().SandboxByID(sbid)
+	if sbI == nil {
+		logrus.Warnf("Invalid SandboxId %s for %s. Ignoring addServiceInfoToCluster", sbid, ep.ID())
+		return nil
+	}
+
+	sb := sbI.(*sandbox)
 	sb.Service.Lock()
 	defer sb.Service.Unlock()
 	logrus.Debugf("addServiceInfoToCluster START for %s %s", ep.svcName, ep.ID())
@@ -658,7 +674,7 @@ func (ep *endpoint) addServiceInfoToCluster(sb *sandbox) error {
 	return nil
 }
 
-func (ep *endpoint) deleteServiceInfoFromCluster(sb *sandbox, method string) error {
+func (ep *endpoint) deleteServiceInfoFromCluster(method string) error {
 	if ep.isAnonymous() && len(ep.myAliases) == 0 {
 		return nil
 	}
@@ -668,6 +684,22 @@ func (ep *endpoint) deleteServiceInfoFromCluster(sb *sandbox, method string) err
 		return nil
 	}
 
+	ep.Lock()
+	sbid := ep.sandboxID
+	ep.Unlock()
+
+	if sbid == "" {
+		logrus.Warnf("Sandbox not set on %s. Ignoring addServiceInfoToCluster", ep.ID())
+		return nil
+	}
+
+	sbI, _ := n.getController().SandboxByID(sbid)
+	if sbI == nil {
+		logrus.Warnf("Invalid SandboxId %s for %s. Ignoring addServiceInfoToCluster", sbid, ep.ID())
+		return nil
+	}
+
+	sb := sbI.(*sandbox)
 	sb.Service.Lock()
 	defer sb.Service.Unlock()
 	logrus.Debugf("deleteServiceInfoFromCluster from %s START for %s %s", method, ep.svcName, ep.ID())

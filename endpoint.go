@@ -596,12 +596,8 @@ func (ep *endpoint) rename(name string) error {
 	}
 
 	c := n.getController()
-	c.Lock()
-	sb := c.sandboxes[ep.sandboxID]
-	c.Unlock()
-
 	if c.isAgent() {
-		if err = ep.deleteServiceInfoFromCluster(sb, "rename"); err != nil {
+		if err = ep.deleteServiceInfoFromCluster("rename"); err != nil {
 			return types.InternalErrorf("Could not delete service state for endpoint %s from cluster on rename: %v", ep.Name(), err)
 		}
 	} else {
@@ -620,15 +616,15 @@ func (ep *endpoint) rename(name string) error {
 	ep.anonymous = false
 
 	if c.isAgent() {
-		if err = ep.addServiceInfoToCluster(sb); err != nil {
+		if err = ep.addServiceInfoToCluster(); err != nil {
 			return types.InternalErrorf("Could not add service state for endpoint %s to cluster on rename: %v", ep.Name(), err)
 		}
 		defer func() {
 			if err != nil {
-				ep.deleteServiceInfoFromCluster(sb, "rename")
+				ep.deleteServiceInfoFromCluster("rename")
 				ep.name = oldName
 				ep.anonymous = oldAnonymous
-				ep.addServiceInfoToCluster(sb)
+				ep.addServiceInfoToCluster()
 			}
 		}()
 	} else {
@@ -712,9 +708,14 @@ func (ep *endpoint) sbLeave(sb *sandbox, force bool, options ...EndpointOption) 
 	}
 
 	ep.Lock()
-	ep.sandboxID = ""
 	ep.network = n
 	ep.Unlock()
+
+	defer func() {
+		ep.Lock()
+		ep.sandboxID = ""
+		ep.Unlock()
+	}()
 
 	// Current endpoint providing external connectivity to the sandbox
 	extEp := sb.getGatewayEndpoint()
@@ -749,7 +750,7 @@ func (ep *endpoint) sbLeave(sb *sandbox, force bool, options ...EndpointOption) 
 		return err
 	}
 
-	if e := ep.deleteServiceInfoFromCluster(sb, "sbLeave"); e != nil {
+	if e := ep.deleteServiceInfoFromCluster("sbLeave"); e != nil {
 		logrus.Errorf("Could not delete service state for endpoint %s from cluster: %v", ep.Name(), e)
 	}
 
