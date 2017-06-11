@@ -9,16 +9,13 @@ import (
 	"github.com/docker/libnetwork/common"
 )
 
-func (c *controller) addEndpointNameResolution(svcName, svcID, nID, eID, containerName string, vip net.IP, serviceAliases, taskAliases []string, ip net.IP, addService bool, method string) error {
+func (c *controller) addEndpointNameResolution(svcName, svcID, nID, eID string, vip net.IP, serviceAliases []string, ip net.IP, addService bool, method string) error {
 	n, err := c.NetworkByID(nID)
 	if err != nil {
 		return err
 	}
 
 	logrus.Debugf("addEndpointNameResolution %s %s add_service:%t", eID, svcName, addService)
-
-	// Add container resolution mappings
-	c.addContainerNameResolution(nID, eID, containerName, taskAliases, ip, method)
 
 	// Add endpoint IP to special "tasks.svc_name" so that the applications have access to DNS RR.
 	n.(*network).addSvcRecords(eID, "tasks."+svcName, ip, nil, false, method)
@@ -62,16 +59,13 @@ func (c *controller) addContainerNameResolution(nID, eID, containerName string, 
 	return nil
 }
 
-func (c *controller) deleteEndpointNameResolution(svcName, svcID, nID, eID, containerName string, vip net.IP, serviceAliases, taskAliases []string, ip net.IP, rmService, multipleEntries bool, method string) error {
+func (c *controller) deleteEndpointNameResolution(svcName, svcID, nID, eID string, vip net.IP, serviceAliases []string, ip net.IP, rmService, multipleEntries bool, method string) error {
 	n, err := c.NetworkByID(nID)
 	if err != nil {
 		return err
 	}
 
 	logrus.Debugf("deleteEndpointNameResolution %s %s rm_service:%t suppress:%t", eID, svcName, rmService, multipleEntries)
-
-	// Delete container resolution mappings
-	c.delContainerNameResolution(nID, eID, containerName, taskAliases, ip, method)
 
 	// Delete the special "tasks.svc_name" backend record.
 	if !multipleEntries {
@@ -171,16 +165,16 @@ func (c *controller) cleanupServiceBindings(cleanupNID string) {
 				continue
 			}
 
-			for eid, be := range lb.backEnds {
+			for eid, ip := range lb.backEnds {
 				service := s
 				loadBalancer := lb
 				networkID := nid
 				epID := eid
-				epIP := be.ip
+				epIP := ip
 
 				cleanupFuncs = append(cleanupFuncs, func() {
-					if err := c.rmServiceBinding(service.name, service.id, networkID, epID, be.containerName, loadBalancer.vip,
-						service.ingressPorts, service.aliases, be.taskAliases, epIP, "cleanupServiceBindings"); err != nil {
+					if err := c.rmServiceBinding(service.name, service.id, networkID, epID, loadBalancer.vip,
+						service.ingressPorts, service.aliases, epIP, "cleanupServiceBindings"); err != nil {
 						logrus.Errorf("Failed to remove service bindings for service %s network %s endpoint %s while cleanup: %v",
 							service.id, networkID, epID, err)
 					}
@@ -196,7 +190,7 @@ func (c *controller) cleanupServiceBindings(cleanupNID string) {
 
 }
 
-func (c *controller) addServiceBinding(svcName, svcID, nID, eID, containerName string, vip net.IP, ingressPorts []*PortConfig, serviceAliases, taskAliases []string, ip net.IP, method string) error {
+func (c *controller) addServiceBinding(svcName, svcID, nID, eID string, vip net.IP, ingressPorts []*PortConfig, serviceAliases []string, ip net.IP, method string) error {
 	var addService bool
 
 	n, err := c.NetworkByID(nID)
@@ -240,7 +234,7 @@ func (c *controller) addServiceBinding(svcName, svcID, nID, eID, containerName s
 		lb = &loadBalancer{
 			vip:      vip,
 			fwMark:   fwMarkCtr,
-			backEnds: make(map[string]loadBalancerBackend),
+			backEnds: make(map[string]net.IP),
 			service:  s,
 		}
 
@@ -252,9 +246,7 @@ func (c *controller) addServiceBinding(svcName, svcID, nID, eID, containerName s
 		addService = true
 	}
 
-	lb.backEnds[eID] = loadBalancerBackend{ip: ip,
-		containerName: containerName,
-		taskAliases:   taskAliases}
+	lb.backEnds[eID] = ip
 
 	ok, entries := s.assignIPToEndpoint(ip.String(), eID)
 	if !ok || entries > 1 {
@@ -269,14 +261,14 @@ func (c *controller) addServiceBinding(svcName, svcID, nID, eID, containerName s
 	}
 
 	// Add the appropriate name resolutions
-	c.addEndpointNameResolution(svcName, svcID, nID, eID, containerName, vip, serviceAliases, taskAliases, ip, addService, "addServiceBinding")
+	c.addEndpointNameResolution(svcName, svcID, nID, eID, vip, serviceAliases, ip, addService, "addServiceBinding")
 
 	logrus.Debugf("addServiceBinding from %s END for %s %s", method, svcName, eID)
 
 	return nil
 }
 
-func (c *controller) rmServiceBinding(svcName, svcID, nID, eID, containerName string, vip net.IP, ingressPorts []*PortConfig, serviceAliases []string, taskAliases []string, ip net.IP, method string) error {
+func (c *controller) rmServiceBinding(svcName, svcID, nID, eID string, vip net.IP, ingressPorts []*PortConfig, serviceAliases []string, ip net.IP, method string) error {
 
 	var rmService bool
 
@@ -347,7 +339,7 @@ func (c *controller) rmServiceBinding(svcName, svcID, nID, eID, containerName st
 	}
 
 	// Delete the name resolutions
-	c.deleteEndpointNameResolution(svcName, svcID, nID, eID, containerName, vip, serviceAliases, taskAliases, ip, rmService, entries > 0, "rmServiceBinding")
+	c.deleteEndpointNameResolution(svcName, svcID, nID, eID, vip, serviceAliases, ip, rmService, entries > 0, "rmServiceBinding")
 
 	logrus.Debugf("rmServiceBinding from %s END for %s %s", method, svcName, eID)
 	return nil

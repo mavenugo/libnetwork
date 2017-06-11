@@ -623,14 +623,12 @@ func (ep *endpoint) addServiceInfoToCluster(sb *sandbox) error {
 		if n.ingress {
 			ingressPorts = ep.ingressPorts
 		}
-		if err := c.addServiceBinding(ep.svcName, ep.svcID, n.ID(), ep.ID(), ep.Name(), ep.virtualIP, ingressPorts, ep.svcAliases, ep.myAliases, ep.Iface().Address().IP, "addServiceInfoToCluster"); err != nil {
+		if err := c.addServiceBinding(ep.svcName, ep.svcID, n.ID(), ep.ID(), ep.virtualIP, ingressPorts, ep.svcAliases, ep.Iface().Address().IP, "addServiceInfoToCluster"); err != nil {
 			return err
 		}
-	} else {
-		// This is a container simply attached to an attachable network
-		if err := c.addContainerNameResolution(n.ID(), ep.ID(), ep.Name(), ep.myAliases, ep.Iface().Address().IP, "addServiceInfoToCluster"); err != nil {
-			return err
-		}
+	}
+	if err := c.addContainerNameResolution(n.ID(), ep.ID(), ep.Name(), ep.myAliases, ep.Iface().Address().IP, "addServiceInfoToCluster"); err != nil {
+		return err
 	}
 
 	name := ep.Name()
@@ -688,14 +686,12 @@ func (ep *endpoint) deleteServiceInfoFromCluster(sb *sandbox, method string) err
 			if n.ingress {
 				ingressPorts = ep.ingressPorts
 			}
-			if err := c.rmServiceBinding(ep.svcName, ep.svcID, n.ID(), ep.ID(), ep.Name(), ep.virtualIP, ingressPorts, ep.svcAliases, ep.myAliases, ep.Iface().Address().IP, "deleteServiceInfoFromCluster"); err != nil {
+			if err := c.rmServiceBinding(ep.svcName, ep.svcID, n.ID(), ep.ID(), ep.virtualIP, ingressPorts, ep.svcAliases, ep.Iface().Address().IP, "deleteServiceInfoFromCluster"); err != nil {
 				return err
 			}
-		} else {
-			// This is a container simply attached to an attachable network
-			if err := c.delContainerNameResolution(n.ID(), ep.ID(), ep.Name(), ep.myAliases, ep.Iface().Address().IP, "deleteServiceInfoFromCluster"); err != nil {
-				return err
-			}
+		}
+		if err := c.delContainerNameResolution(n.ID(), ep.ID(), ep.Name(), ep.myAliases, ep.Iface().Address().IP, "deleteServiceInfoFromCluster"); err != nil {
+			return err
 		}
 	}
 
@@ -881,29 +877,25 @@ func (c *controller) handleEpTableEvent(ev events.Event) {
 		logrus.Debugf("handleEpTableEvent ADD %s R:%v", isAdd, eid, epRec)
 		if svcID != "" {
 			// This is a remote task part of a service
-			if err := c.addServiceBinding(svcName, svcID, nid, eid, containerName, vip, ingressPorts, serviceAliases, taskAliases, ip, "handleEpTableEvent"); err != nil {
+			if err := c.addServiceBinding(svcName, svcID, nid, eid, vip, ingressPorts, serviceAliases, ip, "handleEpTableEvent"); err != nil {
 				logrus.Errorf("failed adding service binding for %s epRec:%v err:%s", eid, epRec, err)
 				return
 			}
-		} else {
-			// This is a remote container simply attached to an attachable network
-			if err := c.addContainerNameResolution(nid, eid, containerName, taskAliases, ip, "handleEpTableEvent"); err != nil {
-				logrus.Errorf("failed adding service binding for %s epRec:%v err:%s", eid, epRec, err)
-			}
+		}
+		if err := c.addContainerNameResolution(nid, eid, containerName, taskAliases, ip, "handleEpTableEvent"); err != nil {
+			logrus.Errorf("failed adding container binding for %s epRec:%v err:%s", eid, epRec, err)
 		}
 	} else {
 		logrus.Debugf("handleEpTableEvent DEL %s R:%v", isAdd, eid, epRec)
 		if svcID != "" {
 			// This is a remote task part of a service
-			if err := c.rmServiceBinding(svcName, svcID, nid, eid, containerName, vip, ingressPorts, serviceAliases, taskAliases, ip, "handleEpTableEvent"); err != nil {
+			if err := c.rmServiceBinding(svcName, svcID, nid, eid, vip, ingressPorts, serviceAliases, ip, "handleEpTableEvent"); err != nil {
 				logrus.Errorf("failed removing service binding for %s epRec:%v err:%s", eid, epRec, err)
 				return
 			}
-		} else {
-			// This is a remote container simply attached to an attachable network
-			if err := c.delContainerNameResolution(nid, eid, containerName, taskAliases, ip, "handleEpTableEvent"); err != nil {
-				logrus.Errorf("failed adding service binding for %s epRec:%v err:%s", eid, epRec, err)
-			}
+		}
+		if err := c.delContainerNameResolution(nid, eid, containerName, taskAliases, ip, "handleEpTableEvent"); err != nil {
+			logrus.Errorf("failed adding container binding for %s epRec:%v err:%s", eid, epRec, err)
 		}
 	}
 }
