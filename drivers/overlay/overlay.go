@@ -28,6 +28,7 @@ const (
 	vxlanPort    = 4789
 	vxlanEncap   = 50
 	secureOption = "encrypted"
+	hostAccess   = "hostaccess"
 )
 
 var initVxlanIdm = make(chan (bool), 1)
