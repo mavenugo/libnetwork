@@ -166,12 +166,15 @@ func (sb *sandbox) restorePath() {
 	}
 }
 
-func (sb *sandbox) setExternalResolvers(content []byte, addrType int, checkLoopback bool) {
+func (sb *sandbox) setExternalResolvers(content []byte, addrType int, checkLoopback bool, ignoreLoopback bool) {
 	servers := resolvconf.GetNameservers(content, addrType)
 	for _, ip := range servers {
 		hostLoopback := false
 		if checkLoopback {
 			hostLoopback = dns.IsIPv4Localhost(ip)
+		}
+		if hostLoopback && ignoreLoopback {
+			continue
 		}
 		sb.extDNS = append(sb.extDNS, extDNSEntry{
 			IPStr:        ip,
@@ -230,13 +233,21 @@ func (sb *sandbox) setupDNS() error {
 		// After building the resolv.conf from the user config save the
 		// external resolvers in the sandbox. Note that --dns 127.0.0.x
 		// config refers to the loopback in the container namespace
-		sb.setExternalResolvers(newRC.Content, types.IPv4, false)
+		sb.setExternalResolvers(newRC.Content, types.IPv4, false, false)
 	} else {
 		// If the host resolv.conf file has 127.0.0.x container should
 		// use the host restolver for queries. This is supported by the
 		// docker embedded DNS server. Hence save the external resolvers
 		// before filtering it out.
-		sb.setExternalResolvers(currRC.Content, types.IPv4, true)
+		sb.setExternalResolvers(currRC.Content, types.IPv4, true, false)
+
+		// If the container's resolv.conf is modified externally with
+		// external resolvers, it must be honored just like host's
+		// /etc/resolv.conf
+		existingRC, err := resolvconf.GetSpecific(sb.config.resolvConfPath)
+		if err == nil {
+			sb.setExternalResolvers(existingRC.Content, types.IPv4, true, true)
+		}
 
 		// Replace any localhost/127.* (at this point we have no info about ipv6, pass it as true)
 		if newRC, err = resolvconf.FilterResolvDNS(currRC.Content, true); err != nil {
@@ -335,7 +346,7 @@ func (sb *sandbox) rebuildDNS() error {
 	}
 
 	if len(sb.extDNS) == 0 {
-		sb.setExternalResolvers(currRC.Content, types.IPv4, false)
+		sb.setExternalResolvers(currRC.Content, types.IPv4, false, false)
 	}
 	var (
 		dnsList        = []string{sb.resolver.NameServer()}
