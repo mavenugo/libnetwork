@@ -52,20 +52,21 @@ type subnetJSON struct {
 }
 
 type network struct {
-	id        string
-	dbIndex   uint64
-	dbExists  bool
-	sbox      osl.Sandbox
-	nlSocket  *nl.NetlinkSocket
-	endpoints endpointTable
-	driver    *driver
-	joinCnt   int
-	once      *sync.Once
-	initEpoch int
-	initErr   error
-	subnets   []*subnet
-	secure    bool
-	mtu       int
+	id         string
+	dbIndex    uint64
+	dbExists   bool
+	sbox       osl.Sandbox
+	nlSocket   *nl.NetlinkSocket
+	endpoints  endpointTable
+	driver     *driver
+	joinCnt    int
+	once       *sync.Once
+	initEpoch  int
+	initErr    error
+	subnets    []*subnet
+	secure     bool
+	hostAccess bool
+	mtu        int
 	sync.Mutex
 }
 
@@ -116,6 +117,9 @@ func (d *driver) CreateNetwork(id string, option map[string]interface{}, nInfo d
 		}
 		if _, ok := optMap[secureOption]; ok {
 			n.secure = true
+		}
+		if _, ok := optMap[hostAccess]; ok {
+			n.hostAccess = true
 		}
 		if val, ok := optMap[netlabel.DriverMTU]; ok {
 			var err error
@@ -276,7 +280,7 @@ func (n *network) destroySandbox() {
 		}
 
 		for _, s := range n.subnets {
-			if hostMode {
+			if hostMode && !n.hostAccess {
 				if err := removeFilters(n.id[:12], s.brName); err != nil {
 					logrus.Warnf("Could not remove overlay filters: %v", err)
 				}
@@ -513,7 +517,26 @@ func (n *network) setupSubnetSandbox(s *subnet, brName, vxlanName string) error 
 		return fmt.Errorf("vxlan interface creation failed for subnet %q: %v", s.subnetIP.String(), err)
 	}
 
-	if hostMode {
+	if !hostMode {
+		var name string
+		for _, i := range sbox.Info().Interfaces() {
+			if i.Bridge() {
+				name = i.DstName()
+			}
+		}
+		cmd := &exec.Cmd{
+			Path:   reexec.Self(),
+			Args:   []string{"set-default-vlan", sbox.Key(), name},
+			Stdout: os.Stdout,
+			Stderr: os.Stderr,
+		}
+		if err := cmd.Run(); err != nil {
+			// not a fatal error
+			logrus.Errorf("reexec to set bridge default vlan failed %v", err)
+		}
+	}
+
+	if hostMode && !n.hostAccess {
 		if err := addFilters(n.id[:12], brName); err != nil {
 			return err
 		}
@@ -841,6 +864,7 @@ func (n *network) Value() []byte {
 	}
 
 	m["secure"] = n.secure
+	m["hostAccess"] = n.hostAccess
 	m["subnets"] = netJSON
 	m["mtu"] = n.mtu
 	b, err = json.Marshal(m)
@@ -891,6 +915,9 @@ func (n *network) SetValue(value []byte) error {
 	if isMap {
 		if val, ok := m["secure"]; ok {
 			n.secure = val.(bool)
+		}
+		if val, ok := m["hostAccess"]; ok {
+			n.hostAccess = val.(bool)
 		}
 		if val, ok := m["mtu"]; ok {
 			n.mtu = int(val.(float64))
