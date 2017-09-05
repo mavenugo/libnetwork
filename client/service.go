@@ -173,7 +173,7 @@ func (cli *NetworkCli) CmdServicePublish(chain string, args ...string) error {
 	}
 
 	sn, nn := parseServiceName(cmd.Arg(0))
-	sc := serviceCreate{Name: sn, Network: nn, MyAliases: flAlias.GetAll()}
+	sc := ServiceCreate{Name: sn, Network: nn, MyAliases: flAlias.GetAll()}
 	obj, _, err := readBody(cli.call("POST", "/services", sc, nil))
 	if err != nil {
 		return err
@@ -205,7 +205,7 @@ func (cli *NetworkCli) CmdServiceUnpublish(chain string, args ...string) error {
 		return err
 	}
 
-	sd := serviceDelete{Name: sn, Force: *force}
+	sd := ServiceDelete{Name: sn, Force: *force}
 	_, _, err = readBody(cli.call("DELETE", "/services/"+serviceID, sd, nil))
 
 	return err
@@ -350,7 +350,7 @@ func (cli *NetworkCli) CmdServiceAttach(chain string, args ...string) error {
 		return err
 	}
 
-	nc := serviceAttach{SandboxID: sandboxID, Aliases: flAlias.GetAll()}
+	nc := ServiceAttach{SandboxID: sandboxID, Aliases: flAlias.GetAll()}
 
 	_, _, err = readBody(cli.call("POST", "/services/"+serviceID+"/backend", nc, nil))
 

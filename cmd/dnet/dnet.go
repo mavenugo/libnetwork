@@ -451,7 +451,7 @@ func (d *dnetConnection) httpCall(method, path string, data interface{}, headers
 
 	req.URL.Host = d.addr
 	req.URL.Scheme = "http"
-
+	fmt.Printf("Requesting http: %+v",req)
 	httpClient := &http.Client{}
 	resp, err := httpClient.Do(req)
 	statusCode := -1

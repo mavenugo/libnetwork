@@ -48,23 +48,24 @@ type networkCreate struct {
 	NetworkOpts map[string]string `json:"network_opts"`
 }
 
-// serviceCreate represents the body of the "publish service" http request message
-type serviceCreate struct {
+// ServiceCreate represents the body of the "publish service" http request message
+type ServiceCreate struct {
 	Name      string   `json:"name"`
 	MyAliases []string `json:"my_aliases"`
 	Network   string   `json:"network_name"`
 }
 
-// serviceDelete represents the body of the "unpublish service" http request message
-type serviceDelete struct {
+// ServiceDelete represents the body of the "unpublish service" http request message
+type ServiceDelete struct {
 	Name  string `json:"name"`
 	Force bool   `json:"force"`
 }
 
-// serviceAttach represents the expected body of the "attach/detach sandbox to/from service" http request messages
-type serviceAttach struct {
-	SandboxID string   `json:"sandbox_id"`
-	Aliases   []string `json:"aliases"`
+// ServiceAttach represents the expected body of the "attach/detach sandbox to/from service" http request messages
+type ServiceAttach struct {
+	SandboxID  string   `json:"sandbox_id"`
+	Aliases    []string `json:"aliases"`
+	SandboxKey string   `json:"sandbox_key"`
 }
 
 // SandboxCreate is the body of the "post /sandboxes" http request message
@@ -76,6 +77,7 @@ type SandboxCreate struct {
 	ResolvConfPath    string                `json:"resolv_conf_path"`
 	DNS               []string              `json:"dns"`
 	ExtraHosts        []extraHost           `json:"extra_hosts"`
+	UseExternalKey    bool                  `json:"use_external_key"`
 	UseDefaultSandbox bool                  `json:"use_default_sandbox"`
 	ExposedPorts      []types.TransportPort `json:"exposed_ports"`
 	PortMapping       []types.PortBinding   `json:"port_mapping"`
