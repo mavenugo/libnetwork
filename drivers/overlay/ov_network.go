@@ -31,7 +31,6 @@ import (
 )
 
 var (
-	hostMode    bool
 	networkOnce sync.Once
 	networkMu   sync.Mutex
 	vniTbl      = make(map[uint32]string)
@@ -413,9 +412,7 @@ func populateVNITbl() {
 
 func networkOnceInit() {
 	populateVNITbl()
-
-	if os.Getenv("_OVERLAY_HOST_MODE") != "" {
-		hostMode = true
+	if hostMode {
 		return
 	}
 
