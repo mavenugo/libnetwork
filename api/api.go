@@ -707,6 +707,12 @@ func procAttachBackend(c libnetwork.NetworkController, vars map[string]string, b
 	if err != nil {
 		return nil, convertNetworkError(err)
 	}
+	if bk.SandboxKey != "" {
+		err = sb.SetKey(bk.SandboxKey)
+		if err != nil {
+			return nil, convertNetworkError(err)
+		}
+	}
 
 	return sb.Key(), &successResponse
 }

@@ -72,8 +72,9 @@ type sandboxCreate struct {
 
 // endpointJoin represents the expected body of the "join endpoint" or "leave endpoint" http request messages
 type endpointJoin struct {
-	SandboxID string   `json:"sandbox_id"`
-	Aliases   []string `json:"aliases"`
+	SandboxID  string   `json:"sandbox_id"`
+	Aliases    []string `json:"aliases"`
+	SandboxKey string   `json:"sandbox_key"`
 }
 
 // servicePublish represents the body of the "publish service" http request message
