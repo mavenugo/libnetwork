@@ -1,34 +1,39 @@
 package server
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
-	"encoding/json"
-	"io/ioutil"
-	"fmt"
-	"io"
-	"bytes"
 
-	log "github.com/sirupsen/logrus"
-	"github.com/gorilla/mux"
-	"github.com/docker/libnetwork/pkg/cniapi"
 	"github.com/docker/docker/pkg/reexec"
-        "github.com/docker/docker/pkg/term"
+	"github.com/docker/docker/pkg/term"
+	"github.com/docker/libnetwork/pkg/cniapi"
+	"github.com/gorilla/mux"
+	log "github.com/sirupsen/logrus"
 )
 
-const(
+const (
 	CNIServerPort = 9005
 )
 
-type Server struct {
+type CniService struct {
 	//k8sClient *APIClient
+	sandboxIDStore  map[string]string // containerID to sandboxID mapping
+	endpointIDStore map[string]string // containerID to endpointID mapping
 }
+
+var cniService *CniService
 
 // InitCNIServer initializes the cni server
 func InitCNIServer(serverCloseChan chan struct{}) error {
 
-	log.Debugf("Starting CNI server")
+	log.Infof("Starting CNI server")
+	cniService = newCniService()
 
 	router := mux.NewRouter()
 	t := router.Headers("Content-Type", "application/json").Methods("POST").Subrouter()
@@ -43,12 +48,10 @@ func InitCNIServer(serverCloseChan chan struct{}) error {
 		if err != nil {
 			panic(err)
 		}
-
-		log.Infof("k8s plugin listening on %s", driverPath)
+		log.Infof("Libnetwork CNI plugin listening on on %s", driverPath)
 		http.Serve(l, router)
 		l.Close()
 		close(serverCloseChan)
-		log.Infof("k8s plugin closing %s", driverPath)
 	}()
 	return nil
 }
@@ -155,9 +158,9 @@ func httpCall(method, path string, data interface{}, headers map[string][]string
 
 	setupRequestHeaders(method, data, req, headers)
 
-	req.URL.Host = fmt.Sprintf("0.0.0.0:%d",2385) 
+	req.URL.Host = fmt.Sprintf("0.0.0.0:%d", 2385)
 	req.URL.Scheme = "http"
-	fmt.Printf("Requesting http: %+v",req)
+	fmt.Printf("Requesting http: %+v", req)
 	httpClient := &http.Client{}
 	resp, err := httpClient.Do(req)
 	statusCode := -1
@@ -179,7 +182,6 @@ func httpCall(method, path string, data interface{}, headers map[string][]string
 	return resp.Body, resp.Header, statusCode, nil
 }
 
-
 func readBody(stream io.ReadCloser, hdr http.Header, statusCode int, err error) ([]byte, int, error) {
 	if stream != nil {
 		defer stream.Close()
@@ -194,17 +196,24 @@ func readBody(stream io.ReadCloser, hdr http.Header, statusCode int, err error) 
 	return body, statusCode, nil
 }
 
-func main(){
-	fmt.Printf("Starting CNI server")
-	        if reexec.Init() {
-                return
-        }
+func newCniService() *CniService {
+	c := new(CniService)
+	c.sandboxIDStore = make(map[string]string)
+	c.endpointIDStore = make(map[string]string)
+	return c
+}
 
-        _, _, stderr := term.StdStreams()
-        log.SetOutput(stderr)
+func main() {
+	fmt.Printf("Starting CNI server")
+	if reexec.Init() {
+		return
+	}
+
+	_, _, stderr := term.StdStreams()
+	log.SetOutput(stderr)
 	serverCloseChan := make(chan struct{})
-	if err:= InitCNIServer(serverCloseChan);err !=nil{
-		fmt.Printf("Failed to initialize CNI server: \n",err)
+	if err := InitCNIServer(serverCloseChan); err != nil {
+		fmt.Printf("Failed to initialize CNI server: \n", err)
 		os.Exit(1)
 	}
 	<-serverCloseChan

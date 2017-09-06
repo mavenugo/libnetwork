@@ -24,6 +24,7 @@ func addPod(w http.ResponseWriter, r *http.Request, vars map[string]string) (_ i
 	if err := json.Unmarshal(content, &cniInfo); err != nil {
 		return nil, err
 	}
+
 	log.Infof("Received add pod request %+v", cniInfo)
 	sbID, err := createSandbox(cniInfo.ContainerID, cniInfo.NetNS)
 	if err != nil {
@@ -31,43 +32,48 @@ func addPod(w http.ResponseWriter, r *http.Request, vars map[string]string) (_ i
 	}
 	defer func() {
 		if retErr != nil {
-			deleteSandbox(sbID)
+			if err := deleteSandbox(sbID); err != nil {
+				log.Warnf("failed to delete sandbox %v on setup pod failure , error:%v", sbID, err)
+			}
 		}
 	}()
+
 	epID, err := createEndpoint(cniInfo.ContainerID, cniInfo.NetConf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create endpoint for %q: %v", cniInfo.ContainerID, err)
 	}
 	defer func() {
 		if retErr != nil {
-			deleteEndpoint(epID, cniInfo.NetConf)
+			if err := deleteEndpoint(epID); err != nil {
+				log.Warnf("failed to delete endpoint %v on setup pod failure , error:%v", epID, err)
+			}
 		}
 	}()
+
 	if err = endpointJoin(sbID, epID, cniInfo.NetNS); err != nil {
 		return nil, fmt.Errorf("failed to attach endpoint to sandbox for container:%q,sandbox:%q,endpoint:%q, error:%v", cniInfo.ContainerID, sbID, epID, err)
 	}
 	defer func() {
 		if retErr != nil {
-			err = endpointLeave(sbID, epID)
-			log.Warnf("failed to detach endpoint %q from sandbox %q , err:%v", epID, sbID, err)
+			if err = endpointLeave(sbID, epID); err != nil {
+				log.Warnf("failed to detach endpoint %q from sandbox %q , err:%v", epID, sbID, err)
+			}
 		}
 	}()
+
+	cniService.endpointIDStore[cniInfo.ContainerID] = sbID
+	cniService.sandboxIDStore[cniInfo.ContainerID] = epID
+
 	return nil, err
 
 }
 
-func createSandbox(ContainerID, netns string) (_ string, retErr error) {
+func createSandbox(ContainerID, netns string) (string, error) {
 	sc := client.SandboxCreate{ContainerID: ContainerID, UseExternalKey: true}
 	obj, _, err := readBody(httpCall("POST", "/sandboxes", sc, nil))
 	if err != nil {
 		return "", err
 	}
-	defer func() {
-		if retErr != nil {
-			_, err = deleteSandbox(ContainerID)
-			log.Warnf("error delete sandbox for container id %q on create sandbox failure, error:%v", ContainerID, err)
-		}
-	}()
 
 	var replyID string
 	err = json.Unmarshal(obj, &replyID)
@@ -77,7 +83,7 @@ func createSandbox(ContainerID, netns string) (_ string, retErr error) {
 	return replyID, nil
 }
 
-func createEndpoint(ContainerID string, netConfig types.NetConf) (_ string, retErr error) {
+func createEndpoint(ContainerID string, netConfig types.NetConf) (string, error) {
 	var replyID string
 	sc := client.ServiceCreate{Name: ContainerID, Network: netConfig.Name}
 	obj, _, err := readBody(httpCall("POST", "/services", sc, nil))
