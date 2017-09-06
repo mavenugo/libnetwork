@@ -1,6 +1,11 @@
 package api
 
-import "github.com/docker/libnetwork/types"
+import (
+	"net"
+
+	"github.com/docker/libnetwork"
+	"github.com/docker/libnetwork/types"
+)
 
 /***********
  Resources
@@ -94,4 +99,35 @@ type serviceDelete struct {
 type extraHost struct {
 	Name    string `json:"name"`
 	Address string `json:"address"`
+}
+
+// endpointInfo contants the endpoint info for https response message on endpoint creation
+type endpointInfo struct {
+	ID          string           `json:"id"`
+	Address     net.IPNet        `json:"address"`
+	AddressIPv6 net.IPNet        `json:"address_ipv6"`
+	MacAddress  net.HardwareAddr `json:"mac_address"`
+	Gateway     net.IP           `json:"gateway"`
+	GatewayIPv6 net.IP           `json:"gateway_ipv6"`
+}
+
+func getEndpointInfo(ep libnetwork.Endpoint) endpointInfo {
+	epInfo := endpointInfo{ID: ep.ID()}
+
+	if ipv4 := ep.Info().Iface().Address(); ipv4 != nil {
+		epInfo.Address = *ipv4
+	}
+	if ipv6 := ep.Info().Iface().AddressIPv6(); ipv6 != nil {
+		epInfo.AddressIPv6 = *ipv6
+	}
+	if mac := ep.Info().Iface().MacAddress(); mac != nil {
+		epInfo.MacAddress = mac
+	}
+	if gw := ep.Info().Gateway(); gw != nil {
+		epInfo.Gateway = gw
+	}
+	if gw6 := ep.Info().GatewayIPv6(); gw6 != nil {
+		epInfo.GatewayIPv6 = gw6
+	}
+	return epInfo
 }

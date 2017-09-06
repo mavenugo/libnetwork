@@ -4,24 +4,22 @@ import (
 	"fmt"
 
 	"github.com/containernetworking/cni/pkg/skel"
+	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/version"
 	"github.com/docker/libnetwork/pkg/cniapi"
 	log "github.com/sirupsen/logrus"
 )
 
 func cmdAdd(args *skel.CmdArgs) error {
-	fmt.Printf("Received CNI ADD %v", args)
 	libClient := cniapi.NewLibNetCniClient()
-	_, err := libClient.SetupPod(args)
+	result, err := libClient.SetupPod(args)
 	if err != nil {
-		fmt.Errorf("Failed to setup Pod , %v", err)
+		return fmt.Errorf("Failed to setup Pod , %v", err)
 	}
-	return nil
-	//return types.PrintResult(result, cniVersion)
+	return types.PrintResult(result, version.Current())
 }
 
 func cmdDel(args *skel.CmdArgs) error {
-	fmt.Printf("Received CNI DEL %v", args)
 	libClient := cniapi.NewLibNetCniClient()
 	if err := libClient.TearDownPod(args); err != nil {
 		return fmt.Errorf("Failed to tear down pod, %v", err)

@@ -9,7 +9,7 @@ import (
 	"net/http"
 )
 
-func deletePod(w http.ResponseWriter, r *http.Request, vars map[string]string) (interface{}, error) {
+func deletePod(w http.ResponseWriter, r *http.Request, vars map[string]string) (interface{},error) {
 	//TODO: need to explore force cleanup and test for parallel delete pods
 	cniInfo := cniapi.CniInfo{}
 
@@ -47,7 +47,7 @@ func deletePod(w http.ResponseWriter, r *http.Request, vars map[string]string) (
 	}
 	delete(cniService.endpointIDStore, epID)
 	delete(cniService.sandboxIDStore, sbID)
-	return content, err
+	return nil, nil
 }
 
 func endpointLeave(sandboxID, endpointID string) error {
