@@ -650,8 +650,9 @@ func procPublishService(c libnetwork.NetworkController, vars map[string]string, 
 	if err != nil {
 		return "", endpointToService(convertNetworkError(err))
 	}
+	epResp := getEndpointInfo(ep)
 
-	return ep.ID(), &createdResponse
+	return epResp, &createdResponse
 }
 
 func procUnpublishService(c libnetwork.NetworkController, vars map[string]string, body []byte) (interface{}, *responseStatus) {

@@ -1,6 +1,10 @@
 package client
 
-import "github.com/docker/libnetwork/types"
+import (
+	"net"
+
+	"github.com/docker/libnetwork/types"
+)
 
 /***********
  Resources
@@ -95,4 +99,14 @@ type sandboxParentUpdate struct {
 	ContainerID string `json:"container_id"`
 	Name        string `json:"name"`
 	Address     string `json:"address"`
+}
+
+// endpointInfo contants the endpoint info for http response message on endpoint creation
+type EndpointInfo struct {
+	ID          string           `json:"id"`
+	Address     net.IPNet        `json:"address"`
+	AddressIPv6 net.IPNet        `json:"address_ipv6"`
+	MacAddress  net.HardwareAddr `json:"mac_address"`
+	Gateway     net.IP           `json:"gateway"`
+	GatewayIPv6 net.IP           `json:"gateway_ipv6"`
 }

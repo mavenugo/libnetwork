@@ -66,11 +66,9 @@ func (l *LibNetCniClient) SetupPod(args *skel.CmdArgs) (*current.Result, error) 
 	url := l.url + AddPodUrl
 	r, err := l.httpClient.Post(url, "application/json", body)
 	if err != nil {
-		fmt.Printf("%v \n", err)
 		return nil, err
 	}
 	defer r.Body.Close()
-	fmt.Printf("Done with http post \n")
 	switch {
 	case r.StatusCode == int(404):
 		return nil, fmt.Errorf("page not found")
@@ -103,14 +101,12 @@ func (l *LibNetCniClient) SetupPod(args *skel.CmdArgs) (*current.Result, error) 
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("Received AddPod Response: %+v", data)
 	return &data, nil
 }
 
 // TearDownPod tears the sandbox and endpoint created for the infra
 // container in the pod.
 func (l *LibNetCniClient) TearDownPod(args *skel.CmdArgs) error {
-	var data current.Result
 	log.Infof("Received Teardown Pod request %+v", args)
 	podNetInfo, err := validatePodNetworkInfo(args)
 	if err != nil {
@@ -123,45 +119,12 @@ func (l *LibNetCniClient) TearDownPod(args *skel.CmdArgs) error {
 	body := bytes.NewBuffer(buf)
 	url := l.url + DelPodUrl
 	r, err := l.httpClient.Post(url, "application/json", body)
+	defer r.Body.Close()
 	if err != nil {
 		fmt.Printf("%v \n", err)
 		return err
 	}
-	defer r.Body.Close()
-	fmt.Printf("Done with http post \n")
-	switch {
-	case r.StatusCode == int(404):
-		return fmt.Errorf("page not found")
 
-	case r.StatusCode == int(403):
-		return fmt.Errorf("access denied")
-
-	case r.StatusCode == int(500):
-		info, err := ioutil.ReadAll(r.Body)
-		if err != nil {
-			return err
-		}
-		err = json.Unmarshal(info, &data)
-		if err != nil {
-			return err
-		}
-		return fmt.Errorf("Internal Server Error")
-
-	case r.StatusCode != int(200):
-		log.Errorf("POST Status '%s' status code %d \n", r.Status, r.StatusCode)
-		return fmt.Errorf("%s", r.Status)
-	}
-
-	response, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		return err
-	}
-
-	err = json.Unmarshal(response, &data)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("Received DelPod Response: %+v", data)
 	return nil
 }
 
