@@ -30,7 +30,7 @@ const (
 	vxlanEncap    = 50
 	secureOption  = "encrypted"
 	hostAccess    = "hostaccess"
-	hostModeLabel = netlabel.DriverPrefix + ".hostmode"
+	hostModeLabel = netlabel.DriverPrefix + "." + networkType + ".hostmode"
 )
 
 var hostMode bool
