@@ -43,7 +43,7 @@ const (
 	// DefaultHTTPHost is used if only port is provided to -H flag e.g. docker -d -H tcp://:8080
 	DefaultHTTPHost = "0.0.0.0"
 	// DefaultHTTPPort is the default http port used by dnet
-	DefaultHTTPPort = 2385
+	DefaultHTTPPort = 2389
 	// DefaultUnixSocket exported
 	DefaultUnixSocket = "/var/run/dnet.sock"
 	cfgFileEnv        = "LIBNETWORK_CFG"
