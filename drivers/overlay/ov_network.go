@@ -336,8 +336,8 @@ func (n *network) destroySandbox() {
 		}
 
 		for _, s := range n.subnets {
-			if hostMode && !n.hostAccess {
-				if err := removeFilters(n.id[:12], s.brName); err != nil {
+			if hostMode {
+				if err := removeFilters(n.id[:12], s.brName, n.hostAccess); err != nil {
 					logrus.Warnf("Could not remove overlay filters: %v", err)
 				}
 			}
@@ -586,8 +586,8 @@ func (n *network) setupSubnetSandbox(s *subnet, brName, vxlanName string) error 
 		}
 	}
 
-	if hostMode && !n.hostAccess {
-		if err := addFilters(n.id[:12], brName); err != nil {
+	if hostMode {
+		if err := addFilters(n.id[:12], brName, n.hostAccess); err != nil {
 			return err
 		}
 	}
