@@ -321,6 +321,7 @@ func (n *network) leaveSandbox() {
 	n.once = &sync.Once{}
 	for _, s := range n.subnets {
 		s.once = &sync.Once{}
+		s.gwIP = nil
 	}
 
 	n.destroySandbox()
@@ -812,6 +813,9 @@ func (d *driver) network(nid string) *network {
 			n.driver = d
 			n.endpoints = endpointTable{}
 			n.once = &sync.Once{}
+			for _, s := range n.subnets {
+				s.gwIP = nil
+			}
 			d.Lock()
 			d.networks[nid] = n
 			d.Unlock()
