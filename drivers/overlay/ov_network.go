@@ -307,7 +307,7 @@ func (n *network) joinSubnetSandbox(s *subnet, restore bool) error {
 	return s.initErr
 }
 
-func (n *network) leaveSandbox() {
+func (n *network) leaveSandbox(linfo driverapi.LeaveInfo) {
 	n.Lock()
 	defer n.Unlock()
 	n.joinCnt--
@@ -321,7 +321,13 @@ func (n *network) leaveSandbox() {
 	n.once = &sync.Once{}
 	for _, s := range n.subnets {
 		s.once = &sync.Once{}
-		s.gwIP = nil
+		if n.hostAccess {
+			err := linfo.ReleaseAddress(s.gwIP.IP)
+			if err != nil {
+				logrus.Errorf("Releasing GW IP failed %v", err)
+			}
+			s.gwIP = nil
+		}
 	}
 
 	n.destroySandbox()
@@ -554,6 +560,7 @@ func (n *network) setupSubnetSandbox(s *subnet, brName, vxlanName string) error 
 
 	if err := sbox.AddInterface(brName, "br",
 		sbox.InterfaceOptions().Address(s.gwIP),
+		sbox.InterfaceOptions().MacAddress(netutils.GenerateMACFromIP(s.gwIP.IP)),
 		sbox.InterfaceOptions().Bridge(true)); err != nil {
 		return fmt.Errorf("bridge creation in sandbox failed for subnet %q: %v", s.subnetIP.String(), err)
 	}
@@ -813,8 +820,10 @@ func (d *driver) network(nid string) *network {
 			n.driver = d
 			n.endpoints = endpointTable{}
 			n.once = &sync.Once{}
-			for _, s := range n.subnets {
-				s.gwIP = nil
+			if n.hostAccess {
+				for _, s := range n.subnets {
+					s.gwIP = nil
+				}
 			}
 			d.Lock()
 			d.networks[nid] = n
