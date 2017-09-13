@@ -2,6 +2,8 @@ package config
 
 import (
 	"strings"
+        "os"
+        "fmt"
 
 	"github.com/BurntSushi/toml"
 	"github.com/docker/docker/pkg/discovery"
@@ -64,6 +66,10 @@ func ParseConfig(tomlCfgFile string) (*Config, error) {
 	if _, err := toml.DecodeFile(tomlCfgFile, cfg); err != nil {
 		return nil, err
 	}
+        if cfg.Cluster.Address==""{
+             cfg.Cluster.Address = os.Getenv("LIBNETWORK_ADDRESS")
+        }
+        fmt.Printf("The cluster address is %s \n",cfg.Cluster.Address)
 
 	cfg.LoadDefaultScopes(cfg.Daemon.DataDir)
 	return cfg, nil
