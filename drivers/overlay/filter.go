@@ -120,6 +120,14 @@ func setFilters(cname, brName string, hostAccess bool, remove bool) error {
 	acceptRule := []string{"-i", brName, "-j", "ACCEPT"}
 	if hostAccess {
 		acceptRule = []string{"-j", "ACCEPT"}
+
+		// Insert/Delete a rule to jump to per-bridge chain for bridge ingress case
+		exists = iptables.Exists(iptables.Filter, globalChain, "-i", brName, "!", "-o", brName, "-j", cname)
+		if (!remove && !exists) || (remove && exists) {
+			if err := iptables.RawCombinedOutput(opt, globalChain, "-i", brName, "!", "-o", brName, "-j", cname); err != nil {
+				return fmt.Errorf("failed to add per-bridge ingress filter rule for bridge %s, network chain %s: %v", brName, cname, err)
+			}
+		}
 	}
 
 	exists = iptables.Exists(iptables.Filter, cname, acceptRule...)
