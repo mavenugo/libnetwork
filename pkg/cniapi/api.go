@@ -27,11 +27,27 @@ type LibNetCniClient struct {
 	httpClient *http.Client
 }
 
+type NetworkConf struct {
+	CNIVersion   string          `json:"cniVersion,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	Type         string          `json:"type,omitempty"`
+	Capabilities map[string]bool `json:"capabilities,omitempty"`
+	IPAM         *IPAMConf       `json:"ipam,omitempty"`
+	DNS          types.DNS       `json:"dns"`
+}
+
+type IPAMConf struct {
+	Type          string `json:"type",omitempty`
+	PreferredPool string `json:"preferred-pool,omitempty"`
+	SubPool       string `json:"sub-pool,omitempty"`
+	Gateway       string `json:"gateway,omitempty"`
+}
+
 type CniInfo struct {
 	ContainerID string
 	NetNS       string
 	IfName      string
-	NetConf     types.NetConf
+	NetConf     NetworkConf
 }
 
 func unixDial(proto, addr string) (conn net.Conn, err error) {
@@ -148,11 +164,11 @@ func validatePodNetworkInfo(args *skel.CmdArgs) (*CniInfo, error) {
 		rt.IfName = args.IfName
 	}
 	var netConf struct {
-		types.NetConf
+		NetworkConf
 	}
 	if err := json.Unmarshal(args.StdinData, &netConf); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal network configuration :%v", err)
 	}
-	rt.NetConf = netConf.NetConf
+	rt.NetConf = netConf.NetworkConf
 	return rt, nil
 }

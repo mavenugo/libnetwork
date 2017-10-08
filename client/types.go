@@ -35,7 +35,7 @@ type SandboxResource struct {
 /***********
   Body types
   ************/
-type ipamConf struct {
+type IPAMConf struct {
 	PreferredPool string
 	SubPool       string
 	Gateway       string
@@ -47,7 +47,7 @@ type NetworkCreate struct {
 	Name        string            `json:"name"`
 	ID          string            `json:"id"`
 	NetworkType string            `json:"network_type"`
-	IPv4Conf    []ipamConf        `json:"ipv4_configuration"`
+	IPv4Conf    []IPAMConf        `json:"ipv4_configuration"`
 	DriverOpts  map[string]string `json:"driver_opts"`
 	NetworkOpts map[string]string `json:"network_opts"`
 }

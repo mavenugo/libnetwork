@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"reflect"
 
-	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/docker/libnetwork/client"
 	"github.com/docker/libnetwork/pkg/cniapi"
@@ -104,12 +103,12 @@ func createSandbox(ContainerID, netns string) (string, error) {
 	return replyID, nil
 }
 
-func createEndpoint(ContainerID string, netConfig types.NetConf) (client.EndpointInfo, error) {
+func createEndpoint(ContainerID string, netConfig cniapi.NetworkConf) (client.EndpointInfo, error) {
 	var ep client.EndpointInfo
 	// Create network if it doesnt exist. Need to handle refcount to delete
-	// network on last pod delete. Also handle different network types and option
+	// network on last pod delete.
 	if !networkExists(netConfig.Name) {
-		if err := createNetwork(netConfig.Name, "overlay"); err != nil {
+		if err := createNetwork(netConfig); err != nil {
 			return ep, err
 		}
 	}
@@ -154,12 +153,25 @@ func networkExists(networkName string) bool {
 
 // createNetwork is a very simple utility to create a default network
 // if not present. This needs to be expanded into a more full utility function
-func createNetwork(networkName string, driver string) error {
-	fmt.Printf("Creating a network %s driver: %s \n", networkName, driver)
+func createNetwork(netConf cniapi.NetworkConf) error {
+	log.Infof("Creating network %v \n", netConf)
 	driverOpts := make(map[string]string)
 	driverOpts["hostaccess"] = ""
-	nc := client.NetworkCreate{Name: networkName, NetworkType: driver,
+	nc := client.NetworkCreate{Name: netConf.Name, NetworkType: getNetworkType(netConf.Type),
 		DriverOpts: driverOpts}
+	if c := netConf.IPAM; c != nil {
+		cfg := client.IPAMConf{}
+		if c.PreferredPool != "" {
+			cfg.PreferredPool = c.PreferredPool
+		}
+		if c.SubPool != "" {
+			cfg.SubPool = c.SubPool
+		}
+		if c.Gateway != "" {
+			cfg.Gateway = c.Gateway
+		}
+		nc.IPv4Conf = []client.IPAMConf{cfg}
+	}
 	obj, _, err := readBody(httpCall("POST", "/networks", nc, nil))
 	if err != nil {
 		return err
@@ -170,4 +182,19 @@ func createNetwork(networkName string, driver string) error {
 		return err
 	}
 	return nil
+}
+
+func getNetworkType(networkType string) string {
+	switch networkType {
+	case "dnet-overlay":
+		return "overlay"
+	case "dnet-bridge":
+		return "bridge"
+	case "dnet-ipvlan":
+		return "ipvlan"
+	case "dnet-macvlan":
+		return "macvlan"
+	default:
+		return "overlay"
+	}
 }
