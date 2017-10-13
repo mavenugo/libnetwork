@@ -2,6 +2,7 @@ package overlay
 
 import (
 	"fmt"
+	"net"
 	"sync"
 
 	"github.com/docker/libnetwork/iptables"
@@ -87,7 +88,7 @@ func removeNetworkChain(cname string) error {
 	return setNetworkChain(cname, true)
 }
 
-func setFilters(cname, brName string, hostAccess bool, remove bool) error {
+func setFilters(cname, brName string, subnetAddr *net.IPNet, hostAccess bool, remove bool) error {
 	opt := "-I"
 	if remove {
 		opt = "-D"
@@ -128,6 +129,16 @@ func setFilters(cname, brName string, hostAccess bool, remove bool) error {
 				return fmt.Errorf("failed to add per-bridge ingress filter rule for bridge %s, network chain %s: %v", brName, cname, err)
 			}
 		}
+
+		// Insert/Delete a POSTROUTING nat rule for MASQ
+		rule := []string{"!", "-s", subnetAddr.String(), "-d", subnetAddr.String(), "-j", "MASQUERADE"}
+		exists = iptables.Exists(iptables.Nat, "POSTROUTING", rule...)
+		if (!remove && !exists) || (remove && exists) {
+			rule = append([]string{opt, "POSTROUTING", "-t", "nat"}, rule...)
+			if err := iptables.RawCombinedOutput(rule...); err != nil {
+				return fmt.Errorf("failed to add POSTROUTING nat rule %s: %v", subnetAddr.String(), err)
+			}
+		}
 	}
 
 	exists = iptables.Exists(iptables.Filter, cname, acceptRule...)
@@ -143,14 +154,14 @@ func setFilters(cname, brName string, hostAccess bool, remove bool) error {
 	return nil
 }
 
-func addFilters(cname, brName string, hostAccess bool) error {
+func addFilters(cname, brName string, subnet *net.IPNet, hostAccess bool) error {
 	defer filterWait()()
 
-	return setFilters(cname, brName, hostAccess, false)
+	return setFilters(cname, brName, subnet, hostAccess, false)
 }
 
-func removeFilters(cname, brName string, hostAccess bool) error {
+func removeFilters(cname, brName string, subnet *net.IPNet, hostAccess bool) error {
 	defer filterWait()()
 
-	return setFilters(cname, brName, hostAccess, true)
+	return setFilters(cname, brName, subnet, hostAccess, true)
 }
