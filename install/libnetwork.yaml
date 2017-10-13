@@ -113,7 +113,7 @@ spec:
       serviceAccountName: libnetwork
       containers:
         - name: libnetwork-dnet
-          image: mavenugo/dnet:tp1
+          image: mavenugo/dnet:tp1.1
           env:
             - name: DNET_ADDRESS
               valueFrom:
@@ -137,7 +137,7 @@ spec:
               mountPath: /run/netns/
 
         - name: libnetwork-cniserver
-          image: mavenugo/ln-cniserver:tp1
+          image: mavenugo/ln-cniserver:tp1.1
           env:
             - name: DNET_ADDRESS
               valueFrom:
